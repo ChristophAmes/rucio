@@ -52,8 +52,24 @@ from rucio.core.monitor import record_counter
 from rucio.core.replica import list_replicas, declare_bad_file_replicas, get_suspicious_files
 from rucio.core.rse_expression_parser import parse_expression
 from rucio.core.vo import list_vos
-from rucio.db.sqla.constants import BadFilesStatus
+from rucio.db.sqla.constants import BadFilesStatus, ReplicaState
 from rucio.db.sqla.util import get_db_time
+
+from rucio.core.rse import list_rses
+
+# Jira stuff
+import json
+import sys
+import requests
+import rucio.common.policy
+import rucio.core.did
+import rucio.core.rule
+from rucio.core.lifetime_exception import list_exceptions
+from rucio.db.sqla.constants import LifetimeExceptionsState
+from rucio.core.did import get_metadata
+from rucio.common.utils import sizefmt
+from rucio.common.exception import DataIdentifierNotFound
+
 
 GRACEFUL_STOP = threading.Event()
 
@@ -230,6 +246,159 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
     die(executable=executable, hostname=socket.gethostname(), pid=os.getpid(), thread=threading.current_thread())
     logging.info('replica_recoverer[%i/%i]: graceful stop done', worker_number, total_workers)
+
+
+
+
+
+
+
+
+
+
+
+def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
+    count = replica['count']
+    rse = replica['rse']
+
+    getfileskwargs = {'younger_than': younger_than,
+                      'nattempts': nattempts,
+                      'exclude_states': ['B', 'R', 'D', 'L', 'T'],
+                      'is_suspicious': True}
+
+    ##### First step: Check if there is a problem with the SE
+    site_expression = rse.split('_')[0] #example: RSE = LRZ_DATADISK, site = LRZ
+    # Get list of RSEs
+    rse_list = list_rses()
+    # Create a list of the RSEs that belong to the site
+    rses_on_site = [] # Goal: [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
+    for rse in rse_list:
+        if rse.split('_')[0] == site_expression:
+            rses_on_site.append([rse])
+
+    # If the combined count of the suspicous files of each RSE excede N (placerholder: 100), then
+    # there might be a problem with the site.
+    suspicious_rses = 0
+    for rse in rses_on_site: #[[rse_1], [rse_2], ...]
+        combined_count = 0
+        for replica in get_suspicious_files(rse_expression=rse[0], filter={'vo': vo}, getfileskwargs)):
+            combined_count += replica['count']
+        rse.append(combined_count) # [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
+        if combined_count > 100: # Filler value, to be changed (Might be better to not to hard-code it)
+            suspicious_rses += 1
+    if len(rses_on_site) == suspicious_rses: # Possible problem: What if the site is down and file transfers are only attempted from some of the RSEs (not all)? The site might not be recognised as being down.
+        # Check if site is down.
+        down_stes = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites=%s' % site_expression)
+        if site == site_expression for site in down_sites.json():
+            # Site is down, declare replica as temporarily unavailable and send ticket
+            replica['state'] = ReplicaState.TEMPORARY_UNAVAILABLE # Is this enough? What exaclty does this even do?
+            # Check if a ticket has been sent
+            tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
+            list_tickets []
+            for issue in tickets.json()['issues']: # Don't know if correct
+                list_tickets.append(issue['fields']['summary'])
+            summary = 'All RSEs of the site %s have a high count of suspicious files. There is possibly a problem with this site.' %site_expression # TO-DO
+            if summary not in list_tickets:
+                # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
+                text = 'Bonjour?'
+
+        # For how long is a file set as temporarily unavailable?
+        # Does the status of these files need to be manually reset to "suspicious"?
+
+    ################
+    ################
+    ################
+    key_project = 'ATLASCREM'
+    issuetype = 'Task'
+
+    exceptions = {}
+
+    sessionid = None
+    with open('cookiefile.txt', 'r') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if line.find('JSESSIONID') > - 1:
+                sessionid = line.split()[-1]
+
+    if not sessionid:
+        sys.exit()
+
+    headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
+
+    ## Is this relevant?
+    for excep in list_exceptions(None, [LifetimeExceptionsState.WAITING, ]):
+        scope, name = excep['scope'], excep['name']
+        if excep['id'] not in exceptions:
+            exceptions[excep['id']] = {'account': excep['account'], 'expires_at': excep['expires_at'], 'comments': excep['comments'], 'size': 0, 'dsn': []}
+            exceptions[excep['id']]['dsn'].append('%s:%s' % (scope, name))
+            try:
+                meta = get_metadata(scope, name)
+                bytes = 0
+                if meta['bytes']:
+                    bytes = meta['bytes']
+                    exceptions[excep['id']]['size'] += bytes
+            except DataIdentifierNotFound as error:
+                print error
+    ##
+
+    list_tickets = []
+    result = requests.get('https://its.cern.ch/jira/rest/api/2/search?jql=project=%s&maxResults=1000' % key_project, headers=headers)
+    for issue in result.json()['issues']:
+        list_tickets.append(issue['fields']['summary'])
+
+    for excep in exceptions:
+        text = 'All RSEs on the site %s have a high number of counts from suspicious files:' %se_expression
+        text += '%s: %d' %(rses_on_se[0][0], rses_on_se[0][1]) # The thought is to show that RSE expression and the count, however the count isn't implemented into rses_on_se yet
+
+        summary = 'Request to approve lifetime exception %s' % excep
+        if summary not in list_tickets:
+            print 'Exception %s does not exist' % excep
+            data = {
+                "fields": {
+                    "project":
+                    {
+                        "key": key_project
+                    },
+                    "summary": summary,
+                    "description": text,
+                    "issuetype": {
+                        "name": issuetype
+                    },
+                    "components": [
+                        {
+                            "name": "LifetimeModelExceptions"
+                        }
+                    ]
+                }
+            }
+            print data
+            result = requests.post('https://its.cern.ch/jira/rest/api/2/issue/', headers=headers, data=json.dumps(data))
+            print result
+            if len(text) > 30000:
+                print "Warning the description field might be too big : %s characters" % len(text)
+        else:
+            print 'Skipping Exception %s that already exist' % excep
+    ################
+    ################
+    ################
+
+
+
+
+    #### Second step
+
+    return
+
+
+
+
+
+
+
+
+
+
+
 
 
 def run(once=False, younger_than=3, nattempts=10, rse_expression='MOCK', vos=None, max_replicas_per_rse=100):
