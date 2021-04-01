@@ -256,18 +256,19 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
 
 
-
+# At what point should this be called in declare_suspicious_replicas_bad?
 def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
     count = replica['count']
     rse = replica['rse']
 
+    # Copied from declare_suspicious_replicas_bad
     getfileskwargs = {'younger_than': younger_than,
                       'nattempts': nattempts,
                       'exclude_states': ['B', 'R', 'D', 'L', 'T'],
                       'is_suspicious': True}
 
-    ##### First step: Check if there is a problem with the SE
-    site_expression = rse.split('_')[0] #example: RSE = LRZ_DATADISK, site = LRZ
+    ##### First step: Check if there is a problem with the site
+    site_expression = rse.split('_')[0] #example: RSE = LRZ-LMU_DATADISK, site = LRZ-LMU
     # Get list of RSEs
     rse_list = list_rses()
     # Create a list of the RSEs that belong to the site
@@ -276,7 +277,7 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
         if rse.split('_')[0] == site_expression:
             rses_on_site.append([rse])
 
-    # If the combined count of the suspicous files of each RSE excede N (placerholder: 100), then
+    # If the combined count of the suspicous files of each RSE excedes N (placerholder: 100), then
     # there might be a problem with the site.
     suspicious_rses = 0
     for rse in rses_on_site: #[[rse_1], [rse_2], ...]
@@ -284,23 +285,43 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
         for replica in get_suspicious_files(rse_expression=rse[0], filter={'vo': vo}, getfileskwargs)):
             combined_count += replica['count']
         rse.append(combined_count) # [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
-        if combined_count > 100: # Filler value, to be changed (Might be better to not to hard-code it)
+        if combined_count > 100: # Filler value, to be changed (Might be better to not hard-code it)
             suspicious_rses += 1
-    if len(rses_on_site) == suspicious_rses: # Possible problem: What if the site is down and file transfers are only attempted from some of the RSEs (not all)? The site might not be recognised as being down.
+    if len(rses_on_site) == suspicious_rses: # Possible problem: What if the site is down, but file transfers are only attempted from some of the RSEs (not all)? The site would
+                                             # pass the check and not be recognised as being down.
         # Check if site is down.
         down_stes = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites=%s' % site_expression)
         if site == site_expression for site in down_sites.json():
             # Site is down, declare replica as temporarily unavailable and send ticket
             replica['state'] = ReplicaState.TEMPORARY_UNAVAILABLE # Is this enough? What exaclty does this even do?
-            # Check if a ticket has been sent
+            # Check if a ticket has already been sent
+            ####
+            #### Need to add some kind of time-based check
             tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
             list_tickets []
             for issue in tickets.json()['issues']: # Don't know if correct
                 list_tickets.append(issue['fields']['summary'])
-            summary = 'All RSEs of the site %s have a high count of suspicious files. There is possibly a problem with this site.' %site_expression # TO-DO
+            summary = 'All RSEs of the site %s have a high count of suspicious files. There is possibly a problem with this site.' %site_expression # Rough draft
             if summary not in list_tickets:
                 # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
-                text = 'Bonjour?'
+                text = 'Site: %s' %site_expression
+                for rse in rses_on_site:
+                    text += '%s: %d \n' %(rse[0], rse[1]) # RSE expression, count
+                ##
+                ## The following is copied from the example below, although it isn't clear if the url has the same data structure (same keys)
+                data = {
+                    'fields':{
+                        "project":
+                        {
+                            "key": key_project
+                        },
+                        "summary": summary,
+                        "description": text,
+                    }
+                }
+                result = requests.post('?', headers='?', data=json.dumps(data))
+                ##
+                ##
 
         # For how long is a file set as temporarily unavailable?
         # Does the status of these files need to be manually reset to "suspicious"?
@@ -308,6 +329,9 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
     ################
     ################
     ################
+
+    # Example code for sending a Jira ticket (sent by Cedric)
+
     key_project = 'ATLASCREM'
     issuetype = 'Task'
 
@@ -347,8 +371,16 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
         list_tickets.append(issue['fields']['summary'])
 
     for excep in exceptions:
-        text = 'All RSEs on the site %s have a high number of counts from suspicious files:' %se_expression
-        text += '%s: %d' %(rses_on_se[0][0], rses_on_se[0][1]) # The thought is to show that RSE expression and the count, however the count isn't implemented into rses_on_se yet
+        text = 'Account [~%s] requested a lifetime extension for a list of DIDs that can be found below\n' % exceptions[excep]['account']
+        text += 'The reason for the extension is "%s"\n' % exceptions[excep]['comments']
+        text += 'It represents %s datasets\n' % len(exceptions[excep]['dsn'])
+        text += 'The estimated volume is %s\n' % sizefmt(exceptions[excep]['size'])
+        text += 'The lifetime exception should expires on %s\n' % str(exceptions[excep]['expires_at'])
+        text += 'Full list below\n'
+        text += '{noformat}\n'
+        for dsn in exceptions[excep]['dsn']:
+            text += '%s\n' %dsn
+        text += '{noformat}\n'
 
         summary = 'Request to approve lifetime exception %s' % excep
         if summary not in list_tickets:
@@ -386,6 +418,7 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
 
 
     #### Second step
+    # Check if is RSE is down
 
     return
 
