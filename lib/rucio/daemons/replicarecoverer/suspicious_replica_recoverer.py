@@ -282,7 +282,7 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
     suspicious_rses = 0
     for rse in rses_on_site: #[[rse_1], [rse_2], ...]
         combined_count = 0
-        for replica in get_suspicious_files(rse_expression=rse[0], filter={'vo': vo}, getfileskwargs)):
+        for replica in get_suspicious_files(rse_expression=rse[0], filter={'vo': vo}, **getfileskwargs):
             combined_count += replica['count']
         rse.append(combined_count) # [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
         if combined_count > 100: # Filler value, to be changed (Might be better to not hard-code it)
@@ -291,35 +291,36 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
                                              # pass the check and not be recognised as being down.
         # Check if site is down.
         down_stes = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites=%s' % site_expression)
-        if site == site_expression for site in down_sites.json():
-            # Site is down, declare replica as temporarily unavailable and send ticket
-            replica['state'] = ReplicaState.TEMPORARY_UNAVAILABLE # Is this enough? What exaclty does this even do?
-            # Check if a ticket has already been sent
-            ####
-            #### Need to add some kind of time-based check
-            tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
-            list_tickets []
-            for issue in tickets.json()['issues']: # Don't know if correct
-                list_tickets.append(issue['fields']['summary'])
-            summary = 'All RSEs of the site %s have a high count of suspicious files. There is possibly a problem with this site.' %site_expression # Rough draft
-            if summary not in list_tickets:
-                # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
-                text = 'Site: %s' %site_expression
-                for rse in rses_on_site:
-                    text += '%s: %d \n' %(rse[0], rse[1]) # RSE expression, count
-                ##
-                ## The following is copied from the example below, although it isn't clear if the url has the same data structure (same keys)
-                data = {
-                    'fields':{
-                        "project":
-                        {
-                            "key": key_project
-                        },
-                        "summary": summary,
-                        "description": text,
+        for site in down_sites.json():
+            if site == site_expression:
+                # Site is down, declare replica as temporarily unavailable and send ticket
+                replica['state'] = ReplicaState.TEMPORARY_UNAVAILABLE # Is this enough? What exaclty does this even do?
+                # Check if a ticket has already been sent
+                ####
+                #### Need to add some kind of time-based check
+                tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
+                list_tickets = []
+                for issue in tickets.json()['issues']: # Don't know if correct
+                    list_tickets.append(issue['fields']['summary'])
+                summary = 'All RSEs of the site %s have a high count of suspicious files. There is possibly a problem with this site.' %site_expression # Rough draft
+                if summary not in list_tickets:
+                    # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
+                    text = 'Site: %s' %site_expression
+                    for rse in rses_on_site:
+                        text += '%s: %d \n' %(rse[0], rse[1]) # RSE expression, count
+                    ##
+                    ## The following is copied from the example below, although it isn't clear if the url has the same data structure (same keys)
+                    data = {
+                        'fields':{
+                            "project":
+                            {
+                                "key": key_project
+                            },
+                            "summary": summary,
+                            "description": text,
+                        }
                     }
-                }
-                result = requests.post('?', headers='?', data=json.dumps(data))
+                    result = requests.post('?', headers='?', data=json.dumps(data))
                 ##
                 ##
 
@@ -332,84 +333,84 @@ def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
 
     # Example code for sending a Jira ticket (sent by Cedric)
 
-    key_project = 'ATLASCREM'
-    issuetype = 'Task'
-
-    exceptions = {}
-
-    sessionid = None
-    with open('cookiefile.txt', 'r') as f:
-        for line in f:
-            line = line.rstrip('\n')
-            if line.find('JSESSIONID') > - 1:
-                sessionid = line.split()[-1]
-
-    if not sessionid:
-        sys.exit()
-
-    headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
-
-    ## Is this relevant?
-    for excep in list_exceptions(None, [LifetimeExceptionsState.WAITING, ]):
-        scope, name = excep['scope'], excep['name']
-        if excep['id'] not in exceptions:
-            exceptions[excep['id']] = {'account': excep['account'], 'expires_at': excep['expires_at'], 'comments': excep['comments'], 'size': 0, 'dsn': []}
-            exceptions[excep['id']]['dsn'].append('%s:%s' % (scope, name))
-            try:
-                meta = get_metadata(scope, name)
-                bytes = 0
-                if meta['bytes']:
-                    bytes = meta['bytes']
-                    exceptions[excep['id']]['size'] += bytes
-            except DataIdentifierNotFound as error:
-                print error
-    ##
-
-    list_tickets = []
-    result = requests.get('https://its.cern.ch/jira/rest/api/2/search?jql=project=%s&maxResults=1000' % key_project, headers=headers)
-    for issue in result.json()['issues']:
-        list_tickets.append(issue['fields']['summary'])
-
-    for excep in exceptions:
-        text = 'Account [~%s] requested a lifetime extension for a list of DIDs that can be found below\n' % exceptions[excep]['account']
-        text += 'The reason for the extension is "%s"\n' % exceptions[excep]['comments']
-        text += 'It represents %s datasets\n' % len(exceptions[excep]['dsn'])
-        text += 'The estimated volume is %s\n' % sizefmt(exceptions[excep]['size'])
-        text += 'The lifetime exception should expires on %s\n' % str(exceptions[excep]['expires_at'])
-        text += 'Full list below\n'
-        text += '{noformat}\n'
-        for dsn in exceptions[excep]['dsn']:
-            text += '%s\n' %dsn
-        text += '{noformat}\n'
-
-        summary = 'Request to approve lifetime exception %s' % excep
-        if summary not in list_tickets:
-            print 'Exception %s does not exist' % excep
-            data = {
-                "fields": {
-                    "project":
-                    {
-                        "key": key_project
-                    },
-                    "summary": summary,
-                    "description": text,
-                    "issuetype": {
-                        "name": issuetype
-                    },
-                    "components": [
-                        {
-                            "name": "LifetimeModelExceptions"
-                        }
-                    ]
-                }
-            }
-            print data
-            result = requests.post('https://its.cern.ch/jira/rest/api/2/issue/', headers=headers, data=json.dumps(data))
-            print result
-            if len(text) > 30000:
-                print "Warning the description field might be too big : %s characters" % len(text)
-        else:
-            print 'Skipping Exception %s that already exist' % excep
+    # key_project = 'ATLASCREM'
+    # issuetype = 'Task'
+    #
+    # exceptions = {}
+    #
+    # sessionid = None
+    # with open('cookiefile.txt', 'r') as f:
+    #     for line in f:
+    #         line = line.rstrip('\n')
+    #         if line.find('JSESSIONID') > - 1:
+    #             sessionid = line.split()[-1]
+    #
+    # if not sessionid:
+    #     sys.exit()
+    #
+    # headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
+    #
+    # ## Is this relevant?
+    # for excep in list_exceptions(None, [LifetimeExceptionsState.WAITING, ]):
+    #     scope, name = excep['scope'], excep['name']
+    #     if excep['id'] not in exceptions:
+    #         exceptions[excep['id']] = {'account': excep['account'], 'expires_at': excep['expires_at'], 'comments': excep['comments'], 'size': 0, 'dsn': []}
+    #         exceptions[excep['id']]['dsn'].append('%s:%s' % (scope, name))
+    #         try:
+    #             meta = get_metadata(scope, name)
+    #             bytes = 0
+    #             if meta['bytes']:
+    #                 bytes = meta['bytes']
+    #                 exceptions[excep['id']]['size'] += bytes
+    #         except DataIdentifierNotFound as error:
+    #             print error
+    # ##
+    #
+    # list_tickets = []
+    # result = requests.get('https://its.cern.ch/jira/rest/api/2/search?jql=project=%s&maxResults=1000' % key_project, headers=headers)
+    # for issue in result.json()['issues']:
+    #     list_tickets.append(issue['fields']['summary'])
+    #
+    # for excep in exceptions:
+    #     text = 'Account [~%s] requested a lifetime extension for a list of DIDs that can be found below\n' % exceptions[excep]['account']
+    #     text += 'The reason for the extension is "%s"\n' % exceptions[excep]['comments']
+    #     text += 'It represents %s datasets\n' % len(exceptions[excep]['dsn'])
+    #     text += 'The estimated volume is %s\n' % sizefmt(exceptions[excep]['size'])
+    #     text += 'The lifetime exception should expires on %s\n' % str(exceptions[excep]['expires_at'])
+    #     text += 'Full list below\n'
+    #     text += '{noformat}\n'
+    #     for dsn in exceptions[excep]['dsn']:
+    #         text += '%s\n' %dsn
+    #     text += '{noformat}\n'
+    #
+    #     summary = 'Request to approve lifetime exception %s' % excep
+    #     if summary not in list_tickets:
+    #         print 'Exception %s does not exist' % excep
+    #         data = {
+    #             "fields": {
+    #                 "project":
+    #                 {
+    #                     "key": key_project
+    #                 },
+    #                 "summary": summary,
+    #                 "description": text,
+    #                 "issuetype": {
+    #                     "name": issuetype
+    #                 },
+    #                 "components": [
+    #                     {
+    #                         "name": "LifetimeModelExceptions"
+    #                     }
+    #                 ]
+    #             }
+    #         }
+    #         print data
+    #         result = requests.post('https://its.cern.ch/jira/rest/api/2/issue/', headers=headers, data=json.dumps(data))
+    #         print result
+    #         if len(text) > 30000:
+    #             print "Warning the description field might be too big : %s characters" % len(text)
+    #     else:
+    #         print 'Skipping Exception %s that already exist' % excep
     ################
     ################
     ################
