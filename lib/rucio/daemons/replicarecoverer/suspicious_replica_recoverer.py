@@ -57,7 +57,7 @@ from rucio.db.sqla.util import get_db_time
 
 from rucio.core.rse import list_rses
 
-# Jira stuff
+# From example (sent by Cedric)
 import json
 import sys
 import requests
