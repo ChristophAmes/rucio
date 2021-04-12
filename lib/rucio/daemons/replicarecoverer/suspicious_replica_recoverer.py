@@ -57,18 +57,18 @@ from rucio.db.sqla.util import get_db_time
 
 from rucio.core.rse import list_rses
 
-# From example (sent by Cedric)
-import json
-import sys
-import requests
-import rucio.common.policy
-import rucio.core.did
-import rucio.core.rule
-from rucio.core.lifetime_exception import list_exceptions
-from rucio.db.sqla.constants import LifetimeExceptionsState
-from rucio.core.did import get_metadata
-from rucio.common.utils import sizefmt
-from rucio.common.exception import DataIdentifierNotFound
+# # From example (sent by Cedric)
+# import json
+# import sys
+# import requests
+# import rucio.common.policy
+# import rucio.core.did
+# import rucio.core.rule
+# from rucio.core.lifetime_exception import list_exceptions
+# from rucio.db.sqla.constants import LifetimeExceptionsState
+# from rucio.core.did import get_metadata
+# from rucio.common.utils import sizefmt
+# from rucio.common.exception import DataIdentifierNotFound
 
 
 GRACEFUL_STOP = threading.Event()
@@ -251,81 +251,146 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
 
 
+def recover_suspicious_replicas(vos, younger_than, nattempts):
 
-
-
-
-
-# At what point should this be called in declare_suspicious_replicas_bad?
-def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
-    count = replica['count']
-    rse = replica['rse']
-
-    # Copied from declare_suspicious_replicas_bad
     getfileskwargs = {'younger_than': younger_than,
-                      'nattempts': nattempts,
-                      'exclude_states': ['B', 'R', 'D', 'L', 'T'],
-                      'is_suspicious': True}
+                        'nattempts': nattempts,
+                        'exclude_states': ['B', 'R', 'D', 'L', 'T'],
+                        'is_suspicious': True}
 
-    ##### First step: Check if there is a problem with the site
-    site_expression = rse.split('_')[0] #example: RSE = LRZ-LMU_DATADISK, site = LRZ-LMU
-    # Get list of RSEs
-    rse_list = list_rses()
-    # Create a list of the RSEs that belong to the site
-    rses_on_site = [] # Goal: [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
-    for rse in rse_list:
-        if rse.split('_')[0] == site_expression:
-            rses_on_site.append([rse])
+    # It is only possible to get suspicious replicas with an rse_expression (is this true?)
+    recoverable_replicas = {} # Goal: {vo1: {site1: {rse1: [replica1, replica2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
+    for vo in vos:
+        if vo not in recoverable_replicas:
+            recoverable_replicas[vo]={}
 
-    # If the combined count of the suspicous files of each RSE excedes N (placerholder: 100), then
-    # there might be a problem with the site.
-    suspicious_rses = 0
-    for rse in rses_on_site: #[[rse_1], [rse_2], ...]
-        combined_count = 0
-        for replica in get_suspicious_files(rse_expression=rse[0], filter={'vo': vo}, **getfileskwargs):
-            combined_count += replica['count']
-        rse.append(combined_count) # [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
-        if combined_count > 100: # Filler value, to be changed (Might be better to not hard-code it)
-            suspicious_rses += 1
-    if len(rses_on_site) == suspicious_rses: # Possible problem: What if the site is down, but file transfers are only attempted from some of the RSEs (not all)? The site would
-                                             # pass the check and not be recognised as being down.
-        # Check if site is down.
-        down_stes = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites=%s' % site_expression)
-        for site in down_sites.json():
-            if site == site_expression:
-                # Site is down, declare replica as temporarily unavailable and send ticket
-                replica['state'] = ReplicaState.TEMPORARY_UNAVAILABLE # Is this enough? What exaclty does this even do?
-                # Check if a ticket has already been sent
-                ####
-                #### Need to add some kind of time-based check
-                tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
-                list_tickets = []
-                for issue in tickets.json()['issues']: # Don't know if correct
-                    list_tickets.append(issue['fields']['summary'])
-                summary = 'All RSEs of the site %s have a high count of suspicious files. There is possibly a problem with this site.' %site_expression # Rough draft
-                if summary not in list_tickets:
-                    # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
-                    text = 'Site: %s' %site_expression
-                    for rse in rses_on_site:
-                        text += '%s: %d \n' %(rse[0], rse[1]) # RSE expression, count
-                    ##
-                    ## The following is copied from the example below, although it isn't clear if the url has the same data structure (same keys)
-                    data = {
-                        'fields':{
-                            "project":
-                            {
-                                "key": key_project
-                            },
-                            "summary": summary,
-                            "description": text,
-                        }
-                    }
-                    result = requests.post('?', headers='?', data=json.dumps(data))
-                ##
-                ##
+        # Get list of RSEs
+        rse_list = list_rses()
+        # Get a list of all site expressions
+        for rse in rse_list:
+            site = rse.split('_')[0] # This assumes that the RSE expression has the strucutre site_X, e.g. LRZ-LMU_DATADISK
+            if site not in recoverable_replicas[vo]:
+                recoverable_replicas[vo][site] = {}
+            if rse not in recoverable_replicas[vo][site]:
+                recoverable_replicas[vo][site][rse] = []
+            # recoverable_replicas should now look like this:
+            # {vo1: {site1: {rse1: [], rse_2: [], ...}, site2: {...}  },    vo2: {...}}
+            suspicious_replicas = get_suspicious_files(rse, filter={'vo': vo}, **getfileskwargs)
+            recoverable_replicas[vo][site][rse].append(suspicious_replicas)
+            # {vo1: {site1: {rse1: [replica1, replica2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
+            # At this point in time there will be RSEs with empty lists, as they have no suspicious replicas
 
-        # For how long is a file set as temporarily unavailable?
-        # Does the status of these files need to be manually reset to "suspicious"?
+        # Check if a site is in the list of knwon unavailable unavailable sites. If it is, remove it.
+        # Remove sites where all RSEs have empty lists (these sites have no suspicious replicas)
+        unavailable_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites')
+        for site in recoverable_replicas[vo].keys(): # Deleting dictionary elements whilst iterating over the dict will cause an error
+        # Workaround is to use keys()
+            if site in unavailable_sites.json():
+                del recoverable_replicas[vo][site]
+            clean_rses = 0
+            for rse in site:
+                if not rse: # If RSE has no suspicious replicas
+                    clean_rses += 1
+            if len(site) == clean_rses:
+                del recoverable_replicas[vo][site]
+
+        # recoverable_replicas should now only have sites with at least one RSE that has a suspicious replica
+        ##
+        ## Problem: Not all RSEs of a site will be in the list, as the ones without suspicious files have been removed.
+        ##
+        for site in recoverable_replicas[vo]:
+            problematic_rse = 0 # RSEs with less than X suspicious files
+            for rse in site:
+                combined_count = 0
+                for replica in rse
+                    combined_count += replica['count']
+                if len(combined_count) > rse_count_limit:
+                    problematic_rse += 1
+            if len(site) ==  problematic_rse:
+                # site has a problem, notify managers
+
+
+        # remove site from list
+
+
+
+    return
+
+
+
+
+
+# # At what point should this be called in declare_suspicious_replicas_bad?
+# def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
+#     count = replica['count']
+#     rse = replica['rse']
+#
+#     # Copied from declare_suspicious_replicas_bad
+#     getfileskwargs = {'younger_than': younger_than,
+#                       'nattempts': nattempts,
+#                       'exclude_states': ['B', 'R', 'D', 'L', 'T'],
+#                       'is_suspicious': True}
+#
+#     ##### First step: Check if there is a problem with the site
+#     site_expression = rse.split('_')[0] #example: RSE = LRZ-LMU_DATADISK, site = LRZ-LMU
+#     # Get list of RSEs
+#     rse_list = list_rses()
+#     # Create a list of the RSEs that belong to the site
+#     rses_on_site = [] # Goal: [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
+#     for rse in rse_list:
+#         if rse.split('_')[0] == site_expression:
+#             rses_on_site.append([rse])
+#
+#     # If the combined count of the suspicous files of each RSE excedes N (placerholder: 100), then
+#     # there might be a problem with the site.
+#     suspicious_rses = 0
+#     for rse in rses_on_site: #[[rse_1], [rse_2], ...]
+#         combined_count = 0
+#         for replica in get_suspicious_files(rse_expression=rse[0], filter={'vo': vo}, **getfileskwargs):
+#             combined_count += replica['count']
+#         rse.append(combined_count) # [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
+#         if combined_count > 100: # Filler value, to be changed (Might be better to not hard-code it)
+#             suspicious_rses += 1
+#     if len(rses_on_site) == suspicious_rses: # Possible problem: What if the site is down, but file transfers are only attempted from some of the RSEs (not all)? The site would
+#                                              # pass the check and not be recognised as being down.
+#         # Check if site is down.
+#         down_stes = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites=%s' % site_expression)
+#         for site in down_sites.json():
+#             if site == site_expression:
+#                 # Site is down, declare replica as temporarily unavailable and send ticket
+#                 replica['state'] = ReplicaState.TEMPORARY_UNAVAILABLE # Is this enough? Would it be better to use BadFileStatus?
+#                 # Check if a ticket has already been sent
+#                 ####
+#                 #### Need to add some kind of time-based check
+#                 tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
+#                 list_tickets = []
+#                 for issue in tickets.json()['issues']: # Don't know if correct
+#                     list_tickets.append(issue['fields']['summary'])
+#                 summary = 'All RSEs of the site %s have a high count of suspicious files.' %site_expression # Rough draft
+#                 if summary not in list_tickets:
+#                     # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
+#                     text = 'Site: %s' %site_expression
+#                     text += 'The combined count for all suspicious files on the RSEs are'
+#                     for rse in rses_on_site:
+#                         text += '%s: %d \n' %(rse[0], rse[1]) # RSE expression, count
+#                     ##
+#                     ## The following is copied from the example below, although it isn't clear if the url has the same data structure (same keys)
+#                     data = {
+#                         'fields':{
+#                             "project":
+#                             {
+#                                 "key": key_project
+#                             },
+#                             "summary": summary,
+#                             "description": text,
+#                         }
+#                     }
+#                     result = requests.post('?', headers='?', data=json.dumps(data))
+#                 ##
+#                 ##
+#
+#         # For how long is a file set as temporarily unavailable?
+#         # Does the status of these files need to be manually reset to "suspicious"?
 
     ################
     ################
