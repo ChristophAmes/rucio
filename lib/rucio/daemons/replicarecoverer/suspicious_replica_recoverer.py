@@ -253,13 +253,26 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
 def recover_suspicious_replicas(vos, younger_than, nattempts):
 
+    # sessionid = None
+    # with open('cookiefile.txt', 'r') as f:
+    #     for line in f:
+    #         line = line.rstrip('\n')
+    #         if line.find('JSESSIONID') > - 1:
+    #             sessionid = line.split()[-1]
+    #
+    # if not sessionid:
+    #     sys.exit()
+    #
+    # headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
+
     getfileskwargs = {'younger_than': younger_than,
                         'nattempts': nattempts,
                         'exclude_states': ['B', 'R', 'D', 'L', 'T'],
                         'is_suspicious': True}
 
-    # It is only possible to get suspicious replicas with an rse_expression (is this true?)
-    recoverable_replicas = {} # Goal: {vo1: {site1: {rse1: [replica1, replica2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
+    recoverable_replicas = {}
+    # Goal: {vo1: {site1: {rse1: [surl1, surl2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
+    # Each surl describes a replica
     for vo in vos:
         if vo not in recoverable_replicas:
             recoverable_replicas[vo]={}
@@ -275,44 +288,96 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
                 recoverable_replicas[vo][site][rse] = []
             # recoverable_replicas should now look like this:
             # {vo1: {site1: {rse1: [], rse_2: [], ...}, site2: {...}  },    vo2: {...}}
+
             suspicious_replicas = get_suspicious_files(rse, filter={'vo': vo}, **getfileskwargs)
-            recoverable_replicas[vo][site][rse].append(suspicious_replicas)
-            # {vo1: {site1: {rse1: [replica1, replica2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
+
+            # Not all RSEs have suspicious replicas on them. However, they should still be added to the list as makes it possibl to
+            # check if a site has problems (by checking whether all the RSEs on it have a certain number of suspicious files).
+
+            # Get the pfns/surls for all suspicious replicas. This is required to be able to mark them as TEMPORARY_UNAVAILABLE
+            if suspicious_replicas: # If suspicious replicas isn't empty / if there is at least one suspicious replica
+                # cnt_surl_not_found = 0
+                for replica in suspicious_replicas:
+                    if vo == replica['scope'].vo:
+                        scope = replica['scope']
+                        name = replica['name']
+                        # rse = replica['rse']
+                        rse_id = replica['rse_id']
+
+                        # if GRACEFUL_STOP.is_set():
+                        #     break
+
+                        # for each suspicious replica, we get its surl through the list_replicas function
+                        surl_not_found = True
+                        for rep in list_replicas([{'scope': scope, 'name': name}]):
+                            for rse_ in rep['rses']:
+                                if rse_ == rse_id: ###### What is he difference between rse and rse_id?
+                                    # Add the surl to the list
+                                    recoverable_replicas[vo][site][rse].append(rep['rses'][site][0])
+                                    surl_not_found = False
+                # if surl_not_found:
+                    # cnt_surl_not_found += 1
+                    # logging.warning('replica_recoverer[%i/%i]: skipping suspicious replica %s on %s, no surls were found.', worker_number, total_workers, name, rse)
+
+
+
+            # recoverable_replicas should now look like this: {vo1: {site1: {rse1: [surl1, surl2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
             # At this point in time there will be RSEs with empty lists, as they have no suspicious replicas
 
-        # Check if a site is in the list of knwon unavailable unavailable sites. If it is, remove it.
-        # Remove sites where all RSEs have empty lists (these sites have no suspicious replicas)
-        unavailable_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites')
-        for site in recoverable_replicas[vo].keys(): # Deleting dictionary elements whilst iterating over the dict will cause an error
-        # Workaround is to use keys()
-            if site in unavailable_sites.json():
+
+
+        down_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites', headers=headers)
+        for site in recoverable_replicas[vo].keys():
+        # Deleting dictionary elements whilst iterating over the dict will cause an error
+        # Workaround is to use keys() (apparently)
+
+        # Check if a site is in the list of known unavailable sites. If it is, remove it from the dictionary (probably should send some sort of logging warning, as
+        # replicas on a site that is down during a scheduled time shouldn't be labeled as suspicious when there is an attempt to access them).
+            if site in down_sites.json():
                 del recoverable_replicas[vo][site]
             clean_rses = 0
             for rse in site:
-                if not rse: # If RSE has no suspicious replicas
+                if len(rse) == 0: # If RSE has no suspicious replicas
                     clean_rses += 1
+            # Remove sites where all RSEs have empty lists (these sites have no suspicious replicas)
             if len(site) == clean_rses:
                 del recoverable_replicas[vo][site]
 
-        # recoverable_replicas should now only have sites with at least one RSE that has a suspicious replica
-        ##
-        ## Problem: Not all RSEs of a site will be in the list, as the ones without suspicious files have been removed.
-        ##
+        # recoverable_replicas should now only have sites where at least one RSE has a suspicious replica
+
+        # Set a limit to the total count of all suspicious replicas on an RSE combined. If this limit if exceeded on all RSEs of a site, then the site is considered
+        # problematic, meaning the replicas are marked as TEMPORARY_UNAVAILABLE and a ticket is sent to the site managers.
+        site_rse_count_limit = 100 # Filler value, needs more thought. Probably shouldn't be hard-coded.
+
         for site in recoverable_replicas[vo]:
-            problematic_rse = 0 # RSEs with less than X suspicious files
+            problematic_rse = 0 # Number of RSEs with a total count less than site_rse_count_limit
+            rse_count_dict = {} # Dict with the RSEs as the keys and their total number of counts as the values
             for rse in site:
-                combined_count = 0
+                rse_count = 0
                 for replica in rse
-                    combined_count += replica['count']
-                if len(combined_count) > rse_count_limit:
+                    rse_count += replica['count']
+                rse_count_dict[rse] = rse_count
+                if len(rse_count) > site_rse_count_limit:
                     problematic_rse += 1
-            if len(site) ==  problematic_rse:
-                # site has a problem, notify managers
+            if len(site) == problematic_rse:
+                # Site has a problem
+                # Set all its replicas as TEMPORARY_UNAVAILABLE
+                for rse in site:
+                    add_bad_pfns(pfns = recoverable_replicas[vo][site][rse], account = ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
+                return
 
+            # Check RSEs individually
 
-        # remove site from list
+            # Should there be a minimum number of suspicious replcisa on an RSE for it to be considered having problems, e.g. at least five replicas
+            # each with count > N?
+            # Should this also be a criteria when looking at the sites? This could combine both checks into one: If all RSEs on a site fulfuill
+            # criteria X, then the site has problems. If only some of the RSEs fulfill criteria X, then only they have problems.
 
+            rse_count_limit = 100 # What exactly should this number be? Should it be the same as site_rse_count_limit?
 
+            for rse in rse_count_dict:
+                if rse_count_dict[rse] > rse_count_limit:
+                    # RSE has a problem
 
     return
 
