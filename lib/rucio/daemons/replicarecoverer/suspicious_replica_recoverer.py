@@ -288,7 +288,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
         rse_list = list_rses()
         # Get a list of all site expressions
         for rse in rse_list:
-            site = rse.split('_')[0] # This assumes that the RSE expression has the strucutre site_X, e.g. LRZ-LMU_DATADISK
+            site = rse.key().split('_')[0] # This assumes that the RSE expression has the strucutre site_X, e.g. LRZ-LMU_DATADISK
             if site not in recoverable_replicas[vo]:
                 recoverable_replicas[vo][site] = {}
             if rse not in recoverable_replicas[vo][site]:
@@ -527,3 +527,5 @@ def stop():
     Graceful exit.
     """
     GRACEFUL_STOP.set()
+
+run(once=True)
