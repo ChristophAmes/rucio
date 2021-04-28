@@ -52,7 +52,7 @@ from rucio.core.monitor import record_counter
 from rucio.core.replica import list_replicas, declare_bad_file_replicas, get_suspicious_files
 from rucio.core.rse_expression_parser import parse_expression
 from rucio.core.vo import list_vos
-from rucio.db.sqla.constants import BadFilesStatus, ReplicaState
+from rucio.db.sqla.constants import BadFilesStatus
 from rucio.db.sqla.util import get_db_time
 
 from rucio.core.rse import list_rses
@@ -228,6 +228,10 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
                             declare_bad_file_replicas(pfns=surls_to_recover[vo][rse_id], reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
                             logging.info('replica_recoverer[%i/%i]: finished declaring bad replicas on %s.', worker_number, total_workers, rse)
 
+
+            # Sticking this here for now, as I'm not sure what the best way to integrate/call this function is yet.
+            recover_suspicious_replicas(vos, younger_than, nattempts)
+
         except (DatabaseException, DatabaseError) as err:
             if match('.*QueuePool.*', str(err.args[0])):
                 logging.warning(traceback.format_exc())
@@ -253,6 +257,9 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
 def recover_suspicious_replicas(vos, younger_than, nattempts):
 
+    # key_project = 'ATLASCREM'
+    # issuetype = 'Task'
+
     # sessionid = None
     # with open('cookiefile.txt', 'r') as f:
     #     for line in f:
@@ -271,7 +278,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
                         'is_suspicious': True}
 
     recoverable_replicas = {}
-    # Goal: {vo1: {site1: {rse1: [surl1, surl2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
+    # Goal: {vo1: {site1: {rse1: {replica1_name:{scope:scope1, surl:surl1}, replica2_name:{...}, ...], rse_2: {...}, ...}, site2: {...}  },    vo2: {...}}
     # Each surl describes a replica
     for vo in vos:
         if vo not in recoverable_replicas:
@@ -285,7 +292,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
             if site not in recoverable_replicas[vo]:
                 recoverable_replicas[vo][site] = {}
             if rse not in recoverable_replicas[vo][site]:
-                recoverable_replicas[vo][site][rse] = []
+                recoverable_replicas[vo][site][rse] = {}
             # recoverable_replicas should now look like this:
             # {vo1: {site1: {rse1: [], rse_2: [], ...}, site2: {...}  },    vo2: {...}}
 
@@ -294,8 +301,9 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
             # Not all RSEs have suspicious replicas on them. However, they should still be added to the list as makes it possibl to
             # check if a site has problems (by checking whether all the RSEs on it have a certain number of suspicious files).
 
-            # Get the pfns/surls for all suspicious replicas. This is required to be able to mark them as TEMPORARY_UNAVAILABLE
-            if suspicious_replicas: # If suspicious replicas isn't empty / if there is at least one suspicious replica
+            # Get the pfns/surls for all suspicious replicas on all RSEs of all sites. This is required to be able to mark them as TEMPORARY_UNAVAILABLE
+            if suspicious_replicas:
+                # If suspicious replicas isn't empty then there is at least one suspcicious replica on the RSE
                 # cnt_surl_not_found = 0
                 for replica in suspicious_replicas:
                     if vo == replica['scope'].vo:
@@ -313,7 +321,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
                             for rse_ in rep['rses']:
                                 if rse_ == rse_id: ###### What is he difference between rse and rse_id?
                                     # Add the surl to the list
-                                    recoverable_replicas[vo][site][rse].append(rep['rses'][site][0])
+                                    recoverable_replicas[vo][site][rse][name] = {'scope':scope, 'surl':rep['rses'][site][0]}
                                     surl_not_found = False
                 # if surl_not_found:
                     # cnt_surl_not_found += 1
@@ -325,13 +333,14 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
             # At this point in time there will be RSEs with empty lists, as they have no suspicious replicas
 
 
-
+        # Not sure what this returns
         down_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites', headers=headers)
+
         for site in recoverable_replicas[vo].keys():
         # Deleting dictionary elements whilst iterating over the dict will cause an error
         # Workaround is to use keys() (apparently)
 
-        # Check if a site is in the list of known unavailable sites. If it is, remove it from the dictionary (probably should send some sort of logging warning, as
+        # Check if a site is in the list of known unavailable sites. If it is, remove it from the dictionary (should probably also send some sort of logging warning, as
         # replicas on a site that is down during a scheduled time shouldn't be labeled as suspicious when there is an attempt to access them).
             if site in down_sites.json():
                 del recoverable_replicas[vo][site]
@@ -339,7 +348,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
             for rse in site:
                 if len(rse) == 0: # If RSE has no suspicious replicas
                     clean_rses += 1
-            # Remove sites where all RSEs have empty lists (these sites have no suspicious replicas)
+            # Remove sites where all RSEs have no suspicious replicas
             if len(site) == clean_rses:
                 del recoverable_replicas[vo][site]
 
@@ -347,211 +356,125 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
 
         # Set a limit to the total count of all suspicious replicas on an RSE combined. If this limit if exceeded on all RSEs of a site, then the site is considered
         # problematic, meaning the replicas are marked as TEMPORARY_UNAVAILABLE and a ticket is sent to the site managers.
-        site_rse_count_limit = 100 # Filler value, needs more thought. Probably shouldn't be hard-coded.
+
+        # If an RSE has more than limit_suspicious_files_on_rse suspicious files, it is marked as problematic
+        limit_suspicious_files_on_rse = 5 # Filler value. Probably shouldn't be hard-coded.
 
         for site in recoverable_replicas[vo]:
-            problematic_rse = 0 # Number of RSEs with a total count less than site_rse_count_limit
-            rse_count_dict = {} # Dict with the RSEs as the keys and their total number of counts as the values
+            count_problematic_rse = 0 # Number of RSEs with less than *limit_suspicious_files_on_rse* suspicious replicas
+            list_problematic_rses = [] # List of RSEs that are deemed problematic
             for rse in site:
-                rse_count = 0
-                for replica in rse
-                    rse_count += replica['count']
-                rse_count_dict[rse] = rse_count
-                if len(rse_count) > site_rse_count_limit:
-                    problematic_rse += 1
-            if len(site) == problematic_rse:
+                if len(rse) > limit_suspicious_files_on_rse:
+                    count_problematic_rse += 1
+                    list_problematic_rses.append(rse.key())
+            if len(site) == count_problematic_rse:
                 # Site has a problem
-                # Set all its replicas as TEMPORARY_UNAVAILABLE
+                # Set all of the replicas on the site as TEMPORARY_UNAVAILABLE
                 for rse in site:
-                    add_bad_pfns(pfns = recoverable_replicas[vo][site][rse], account = ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
-                return
+                    surls_list = []
+                    for replica in rse: # replica = replica1_name:{scope:scope1, surl:surl1}
+                        surls_list.append(replica['surl'])
 
-            # Check RSEs individually
+                    # REMOVED FOR TEST:
+                    # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE) # What is an account in this case?
 
-            # Should there be a minimum number of suspicious replcisa on an RSE for it to be considered having problems, e.g. at least five replicas
-            # each with count > N?
-            # Should this also be a criteria when looking at the sites? This could combine both checks into one: If all RSEs on a site fulfuill
-            # criteria X, then the site has problems. If only some of the RSEs fulfill criteria X, then only they have problems.
+                print("All RSEs on site %s are problematic. Send a Jira ticket for the site." % site)
+                continue # Move on to next site
 
-            rse_count_limit = 100 # What exactly should this number be? Should it be the same as site_rse_count_limit?
+                # Send a ticket
+                # tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
+                # list_tickets = []
+                # for issue in tickets.json()['issues']: # Don't know if correct
+                #     list_tickets.append(issue['fields']['summary'])
+                # # Rough draft:
+                # summary = 'All RSEs of the site %s have a high count of suspicious replicas.' %site
+                # if summary not in list_tickets:
+                #     # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
+                #     text = 'There is possibly a problem with %s. TEXT HERE' %site
+                #     text += 'RSE expression, number of suspicious replicas, combined number of attepts for all replicas:'
+                #     for rse in rses_on_site:
+                #         text += 'X, Y, Z'
+                #     ##
+                #     ## The following is copied from the example below, although it isn't clear what the structure of the request needs to be.
+                #     data = {
+                #         'fields':{
+                #             "project":
+                #             {
+                #                 "key": key_project
+                #             },
+                #             "summary": summary,
+                #             "description": text,
+                #         }
+                #     }
+                #     result = requests.post('?', headers='?', data=json.dumps(data))
 
-            for rse in rse_count_dict:
-                if rse_count_dict[rse] > rse_count_limit:
-                    # RSE has a problem
+
+
+            # Only specific RSEs of a site have a problem. Check RSEs individually
+            for rse in list_problematic_rses: # Here, "rse" is only the name of the replica, it doesn't refer to the dictionary
+                rse_type = rse.split('_')[-1]
+                if (rse_type == "SCRATCHDISK" || rse_type == "LOCALGROUPDISK"): # These storage types need to be handled differently
+                    # To be implemented
+                    continue
+
+                if len(recoverable_replicas[vo][site][rse]) > limit_suspicious_files_on_rse: # If too many suspicious replicas, RSE is problematic
+
+                    # REMOVED FOR TEST:
+                    # add_bad_pfns(pfns=recoverable_replicas[vo][site][rse], account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
+
+                    print("RSE %s of site %s is problematic. Send a Jira ticket for the RSE." % (rse, site))
+
+                # Check replicas individually
+                else:
+                    for replica in recoverable_replicas[vo][site][rse]:
+                        # Beginning of file name indicates what type of file the replica is
+                        file_type = replica.key().split('.')[0]
+                        scope = replica['scope']
+
+                        if scope.split('_')[0].startswith('mc') and scope.split('_')[1].endswith('TeV'): # Assumes scope of Monte Carlo data has structure mcX_YTeV
+                            # Monte Carlo dataset
+
+                            if file_type == "log":
+                                # Don't care about log files, declare lost
+                                print("MC log: %s  %s  %s", % (rse, scope, replica.key()))
+
+                            if file_type == "HITS":
+                                print("MC HITS: %s  %s  %s", % (rse, scope, replica.key()))
+
+                            if file_type == "EVNT":
+                                print("MC EVNT: %s  %s  %s", % (rse, scope, replica.key()))
+
+                            if file_type == "TXT":
+                                print("MC TXT: %s  %s  %s", % (rse, scope, replica.key()))
+
+                            if file_type == "AOD":
+                                print("MC AOD: %s  %s  %s", % (rse, scope, replica.key()))
+
+                            if file_type.split('_')[0] == "DAOD":
+                                print("MC DAOD: %s  %s  %s", % (rse, scope, replica.key()))
+
+                            if file_type.split('_')[0] == "RDO":
+                                print("MC RDO: %s  %s  %s", % (rse, scope, replica.key()))
+
+
+                        if scope.split('_')[0].startswith('data') and scope.split('_')[1].endswith('TeV'):
+                            if file_type.split('_')[0] == "DRAW":
+                                print("data DRAW: %s  %s  %s", % (rse, scope, replica.key()))
+                                # Data file?
+                                continue
+                            continue
+
+                        if scope.split('.')[0] == 'user' or scope.split('.')[0] == 'group':
+                            print("user/group scope: %s  %s  %s", % (rse, scope, replica.key()))
+                            continue
+
+
 
     return
 
 
 
 
-
-# # At what point should this be called in declare_suspicious_replicas_bad?
-# def recover_suspicious_replicas(vo, replica, younger_than, nattempts):
-#     count = replica['count']
-#     rse = replica['rse']
-#
-#     # Copied from declare_suspicious_replicas_bad
-#     getfileskwargs = {'younger_than': younger_than,
-#                       'nattempts': nattempts,
-#                       'exclude_states': ['B', 'R', 'D', 'L', 'T'],
-#                       'is_suspicious': True}
-#
-#     ##### First step: Check if there is a problem with the site
-#     site_expression = rse.split('_')[0] #example: RSE = LRZ-LMU_DATADISK, site = LRZ-LMU
-#     # Get list of RSEs
-#     rse_list = list_rses()
-#     # Create a list of the RSEs that belong to the site
-#     rses_on_site = [] # Goal: [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
-#     for rse in rse_list:
-#         if rse.split('_')[0] == site_expression:
-#             rses_on_site.append([rse])
-#
-#     # If the combined count of the suspicous files of each RSE excedes N (placerholder: 100), then
-#     # there might be a problem with the site.
-#     suspicious_rses = 0
-#     for rse in rses_on_site: #[[rse_1], [rse_2], ...]
-#         combined_count = 0
-#         for replica in get_suspicious_files(rse_expression=rse[0], filter={'vo': vo}, **getfileskwargs):
-#             combined_count += replica['count']
-#         rse.append(combined_count) # [[rse_1, combined_count_1], [rse_2, combined_count_2], ...]
-#         if combined_count > 100: # Filler value, to be changed (Might be better to not hard-code it)
-#             suspicious_rses += 1
-#     if len(rses_on_site) == suspicious_rses: # Possible problem: What if the site is down, but file transfers are only attempted from some of the RSEs (not all)? The site would
-#                                              # pass the check and not be recognised as being down.
-#         # Check if site is down.
-#         down_stes = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites=%s' % site_expression)
-#         for site in down_sites.json():
-#             if site == site_expression:
-#                 # Site is down, declare replica as temporarily unavailable and send ticket
-#                 replica['state'] = ReplicaState.TEMPORARY_UNAVAILABLE # Is this enough? Would it be better to use BadFileStatus?
-#                 # Check if a ticket has already been sent
-#                 ####
-#                 #### Need to add some kind of time-based check
-#                 tickets = requests.get('https://its.cern.ch/jira/projects/ALARMTESTING') # Url used for testing, not the final solution
-#                 list_tickets = []
-#                 for issue in tickets.json()['issues']: # Don't know if correct
-#                     list_tickets.append(issue['fields']['summary'])
-#                 summary = 'All RSEs of the site %s have a high count of suspicious files.' %site_expression # Rough draft
-#                 if summary not in list_tickets:
-#                     # Send ticket (to whom?) (Is this even necessary? Wouldn't the site managers already know that the site is down?)
-#                     text = 'Site: %s' %site_expression
-#                     text += 'The combined count for all suspicious files on the RSEs are'
-#                     for rse in rses_on_site:
-#                         text += '%s: %d \n' %(rse[0], rse[1]) # RSE expression, count
-#                     ##
-#                     ## The following is copied from the example below, although it isn't clear if the url has the same data structure (same keys)
-#                     data = {
-#                         'fields':{
-#                             "project":
-#                             {
-#                                 "key": key_project
-#                             },
-#                             "summary": summary,
-#                             "description": text,
-#                         }
-#                     }
-#                     result = requests.post('?', headers='?', data=json.dumps(data))
-#                 ##
-#                 ##
-#
-#         # For how long is a file set as temporarily unavailable?
-#         # Does the status of these files need to be manually reset to "suspicious"?
-
-    ################
-    ################
-    ################
-
-    # Example code for sending a Jira ticket (sent by Cedric)
-
-    # key_project = 'ATLASCREM'
-    # issuetype = 'Task'
-    #
-    # exceptions = {}
-    #
-    # sessionid = None
-    # with open('cookiefile.txt', 'r') as f:
-    #     for line in f:
-    #         line = line.rstrip('\n')
-    #         if line.find('JSESSIONID') > - 1:
-    #             sessionid = line.split()[-1]
-    #
-    # if not sessionid:
-    #     sys.exit()
-    #
-    # headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
-    #
-    # ## Is this relevant?
-    # for excep in list_exceptions(None, [LifetimeExceptionsState.WAITING, ]):
-    #     scope, name = excep['scope'], excep['name']
-    #     if excep['id'] not in exceptions:
-    #         exceptions[excep['id']] = {'account': excep['account'], 'expires_at': excep['expires_at'], 'comments': excep['comments'], 'size': 0, 'dsn': []}
-    #         exceptions[excep['id']]['dsn'].append('%s:%s' % (scope, name))
-    #         try:
-    #             meta = get_metadata(scope, name)
-    #             bytes = 0
-    #             if meta['bytes']:
-    #                 bytes = meta['bytes']
-    #                 exceptions[excep['id']]['size'] += bytes
-    #         except DataIdentifierNotFound as error:
-    #             print error
-    # ##
-    #
-    # list_tickets = []
-    # result = requests.get('https://its.cern.ch/jira/rest/api/2/search?jql=project=%s&maxResults=1000' % key_project, headers=headers)
-    # for issue in result.json()['issues']:
-    #     list_tickets.append(issue['fields']['summary'])
-    #
-    # for excep in exceptions:
-    #     text = 'Account [~%s] requested a lifetime extension for a list of DIDs that can be found below\n' % exceptions[excep]['account']
-    #     text += 'The reason for the extension is "%s"\n' % exceptions[excep]['comments']
-    #     text += 'It represents %s datasets\n' % len(exceptions[excep]['dsn'])
-    #     text += 'The estimated volume is %s\n' % sizefmt(exceptions[excep]['size'])
-    #     text += 'The lifetime exception should expires on %s\n' % str(exceptions[excep]['expires_at'])
-    #     text += 'Full list below\n'
-    #     text += '{noformat}\n'
-    #     for dsn in exceptions[excep]['dsn']:
-    #         text += '%s\n' %dsn
-    #     text += '{noformat}\n'
-    #
-    #     summary = 'Request to approve lifetime exception %s' % excep
-    #     if summary not in list_tickets:
-    #         print 'Exception %s does not exist' % excep
-    #         data = {
-    #             "fields": {
-    #                 "project":
-    #                 {
-    #                     "key": key_project
-    #                 },
-    #                 "summary": summary,
-    #                 "description": text,
-    #                 "issuetype": {
-    #                     "name": issuetype
-    #                 },
-    #                 "components": [
-    #                     {
-    #                         "name": "LifetimeModelExceptions"
-    #                     }
-    #                 ]
-    #             }
-    #         }
-    #         print data
-    #         result = requests.post('https://its.cern.ch/jira/rest/api/2/issue/', headers=headers, data=json.dumps(data))
-    #         print result
-    #         if len(text) > 30000:
-    #             print "Warning the description field might be too big : %s characters" % len(text)
-    #     else:
-    #         print 'Skipping Exception %s that already exist' % excep
-    ################
-    ################
-    ################
-
-
-
-
-    #### Second step
-    # Check if is RSE is down
-
-    return
 
 
 
