@@ -257,20 +257,20 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
 def recover_suspicious_replicas(vos, younger_than, nattempts):
 
-    # key_project = 'ATLASCREM'
-    # issuetype = 'Task'
+    key_project = 'ATLASCREM'
+    issuetype = 'Task'
 
-    # sessionid = None
-    # with open('cookiefile.txt', 'r') as f:
-    #     for line in f:
-    #         line = line.rstrip('\n')
-    #         if line.find('JSESSIONID') > - 1:
-    #             sessionid = line.split()[-1]
+    sessionid = None
+    with open('cookiefile.txt', 'r') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if line.find('JSESSIONID') > - 1:
+                sessionid = line.split()[-1]
+
+    if not sessionid:
+        sys.exit()
     #
-    # if not sessionid:
-    #     sys.exit()
-    #
-    # headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
+    headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
 
     getfileskwargs = {'younger_than': younger_than,
                         'nattempts': nattempts,
@@ -319,7 +319,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
                         surl_not_found = True
                         for rep in list_replicas([{'scope': scope, 'name': name}]):
                             for rse_ in rep['rses']:
-                                if rse_ == rse_id: ###### What is he difference between rse and rse_id?
+                                if rse_ == rse_id: # What is he difference between rse and rse_id?
                                     # Add the surl to the list
                                     recoverable_replicas[vo][site][rse][name] = {'scope':scope, 'surl':rep['rses'][site][0]}
                                     surl_not_found = False
@@ -413,7 +413,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
             # Only specific RSEs of a site have a problem. Check RSEs individually
             for rse in list_problematic_rses: # Here, "rse" is only the name of the replica, it doesn't refer to the dictionary
                 rse_type = rse.split('_')[-1]
-                if (rse_type == "SCRATCHDISK" || rse_type == "LOCALGROUPDISK"): # These storage types need to be handled differently
+                if (rse_type == "SCRATCHDISK") or (rse_type == "LOCALGROUPDISK"): # These storage types need to be handled differently
                     # To be implemented
                     continue
 
@@ -425,48 +425,48 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
                     print("RSE %s of site %s is problematic. Send a Jira ticket for the RSE." % (rse, site))
 
                 # Check replicas individually
-                else:
-                    for replica in recoverable_replicas[vo][site][rse]:
-                        # Beginning of file name indicates what type of file the replica is
-                        file_type = replica.key().split('.')[0]
-                        scope = replica['scope']
-
-                        if scope.split('_')[0].startswith('mc') and scope.split('_')[1].endswith('TeV'): # Assumes scope of Monte Carlo data has structure mcX_YTeV
-                            # Monte Carlo dataset
-
-                            if file_type == "log":
-                                # Don't care about log files, declare lost
-                                print("MC log: %s  %s  %s", % (rse, scope, replica.key()))
-
-                            if file_type == "HITS":
-                                print("MC HITS: %s  %s  %s", % (rse, scope, replica.key()))
-
-                            if file_type == "EVNT":
-                                print("MC EVNT: %s  %s  %s", % (rse, scope, replica.key()))
-
-                            if file_type == "TXT":
-                                print("MC TXT: %s  %s  %s", % (rse, scope, replica.key()))
-
-                            if file_type == "AOD":
-                                print("MC AOD: %s  %s  %s", % (rse, scope, replica.key()))
-
-                            if file_type.split('_')[0] == "DAOD":
-                                print("MC DAOD: %s  %s  %s", % (rse, scope, replica.key()))
-
-                            if file_type.split('_')[0] == "RDO":
-                                print("MC RDO: %s  %s  %s", % (rse, scope, replica.key()))
-
-
-                        if scope.split('_')[0].startswith('data') and scope.split('_')[1].endswith('TeV'):
-                            if file_type.split('_')[0] == "DRAW":
-                                print("data DRAW: %s  %s  %s", % (rse, scope, replica.key()))
-                                # Data file?
-                                continue
-                            continue
-
-                        if scope.split('.')[0] == 'user' or scope.split('.')[0] == 'group':
-                            print("user/group scope: %s  %s  %s", % (rse, scope, replica.key()))
-                            continue
+                # else:
+                #     for replica in recoverable_replicas[vo][site][rse]:
+                #         # Beginning of file name indicates what type of file the replica is
+                #         file_type = replica.key().split('.')[0]
+                #         scope = replica['scope']
+                #
+                #         if (scope.split('_')[0].startswith('mc')) and (scope.split('_')[1].endswith('TeV')): # Assumes scope of Monte Carlo data has structure mcX_YTeV
+                #             # Monte Carlo dataset
+                #
+                #             if file_type == "log":
+                #                 # Don't care about log files, declare lost
+                #                 print("MC log: %s  %s  %s", % (rse, scope, replica.key()))
+                #
+                #             if file_type == "HITS":
+                #                 print("MC HITS: %s  %s  %s", % (rse, scope, replica.key()))
+                #
+                #             if file_type == "EVNT":
+                #                 print("MC EVNT: %s  %s  %s", % (rse, scope, replica.key()))
+                #
+                #             if file_type == "TXT":
+                #                 print("MC TXT: %s  %s  %s", % (rse, scope, replica.key()))
+                #
+                #             if file_type == "AOD":
+                #                 print("MC AOD: %s  %s  %s", % (rse, scope, replica.key()))
+                #
+                #             if file_type.split('_')[0] == "DAOD":
+                #                 print("MC DAOD: %s  %s  %s", % (rse, scope, replica.key()))
+                #
+                #             if file_type.split('_')[0] == "RDO":
+                #                 print("MC RDO: %s  %s  %s", % (rse, scope, replica.key()))
+                #
+                #
+                #         if (scope.split('_')[0].startswith('data')) and (scope.split('_')[1].endswith('TeV')):
+                #             if file_type.split('_')[0] == "DRAW":
+                #                 print("data DRAW: %s  %s  %s", % (rse, scope, replica.key()))
+                #                 # Data file?
+                #                 continue
+                #             continue
+                #
+                #         if (scope.split('.')[0] == 'user') or (scope.split('.')[0] == 'group'):
+                #             print("user/group scope: %s  %s  %s", % (rse, scope, replica.key()))
+                #             continue
 
 
 
