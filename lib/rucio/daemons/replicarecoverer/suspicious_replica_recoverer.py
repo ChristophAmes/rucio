@@ -257,20 +257,20 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
 def recover_suspicious_replicas(vos, younger_than, nattempts):
 
-    key_project = 'ATLASCREM'
-    issuetype = 'Task'
-
-    sessionid = None
-    with open('cookiefile.txt', 'r') as f:
-        for line in f:
-            line = line.rstrip('\n')
-            if line.find('JSESSIONID') > - 1:
-                sessionid = line.split()[-1]
-
-    if not sessionid:
-        sys.exit()
+    # key_project = 'ATLASCREM'
+    # issuetype = 'Task'
     #
-    headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
+    # sessionid = None
+    # with open('cookiefile.txt', 'r') as f:
+    #     for line in f:
+    #         line = line.rstrip('\n')
+    #         if line.find('JSESSIONID') > - 1:
+    #             sessionid = line.split()[-1]
+    #
+    # if not sessionid:
+    #     sys.exit()
+    # #
+    # headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
 
     getfileskwargs = {'younger_than': younger_than,
                         'nattempts': nattempts,
@@ -334,7 +334,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
 
 
         # Not sure what this returns
-        down_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites', headers=headers)
+        down_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites')
 
         for site in recoverable_replicas[vo].keys():
         # Deleting dictionary elements whilst iterating over the dict will cause an error
