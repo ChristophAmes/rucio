@@ -39,8 +39,9 @@ import traceback
 from datetime import datetime, timedelta
 from re import match
 from sys import argv
-
-from sqlalchemy.exc import DatabaseError
+#import ssl
+#ssl._create_default_https_context = ssl._create_unverified_context
+#import urllib 
 
 import rucio.db.sqla.util
 from rucio.common.config import config_get_bool
@@ -60,7 +61,7 @@ from rucio.core.rse import list_rses
 # # From example (sent by Cedric)
 # import json
 # import sys
-# import requests
+import requests
 # import rucio.common.policy
 # import rucio.core.did
 # import rucio.core.rule
@@ -257,20 +258,20 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, rs
 
 def recover_suspicious_replicas(vos, younger_than, nattempts):
 
-    # key_project = 'ATLASCREM'
-    # issuetype = 'Task'
+    key_project = 'ATLASCREM'
+    issuetype = 'Task'
+   
+    sessionid = None
+    with open('cookiefile.txt', 'r') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if line.find('JSESSIONID') > - 1:
+                sessionid = line.split()[-1]
+   
+    if not sessionid:
+        sys.exit()
     #
-    # sessionid = None
-    # with open('cookiefile.txt', 'r') as f:
-    #     for line in f:
-    #         line = line.rstrip('\n')
-    #         if line.find('JSESSIONID') > - 1:
-    #             sessionid = line.split()[-1]
-    #
-    # if not sessionid:
-    #     sys.exit()
-    # #
-    # headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
+    headers={'cookie': 'JSESSIONID=%s' % (sessionid), 'Content-Type': 'application/json'}
 
     getfileskwargs = {'younger_than': younger_than,
                         'nattempts': nattempts,
@@ -283,20 +284,34 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
     for vo in vos:
         if vo not in recoverable_replicas:
             recoverable_replicas[vo]={}
+        
+        # Not sure what this returns
+        print(headers)
+        #down_sites = urllib.request.urlopen("https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites")
+        down_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites', headers=headers, verify=False)
+        print(down_sites)
+        print(down_sites.json())
 
         # Get list of RSEs
         rse_list = list_rses()
         # Get a list of all site expressions
         for rse in rse_list:
-            site = rse.key().split('_')[0] # This assumes that the RSE expression has the strucutre site_X, e.g. LRZ-LMU_DATADISK
+            if rse['deleted'] == True:
+                continue
+            rse_expr = rse['rse']
+            # Details: Expression does not comply to RSE Expression syntax
+            if (rse_expr == "MOCK-POSIX") or (rse_expr == 'ru-PNPI_XCACHE') or (rse_expr == 'ru-PNPI_XCACHE_LOCAL') or (rse_expr == 'ru-PNPI_XCACHE_NODES'):
+                print(rse)
+                continue
+            site = rse_expr.split('_')[0] # This assumes that the RSE expression has the strucutre site_X, e.g. LRZ-LMU_DATADISK
             if site not in recoverable_replicas[vo]:
                 recoverable_replicas[vo][site] = {}
-            if rse not in recoverable_replicas[vo][site]:
-                recoverable_replicas[vo][site][rse] = {}
+            if rse_expr not in recoverable_replicas[vo][site]:
+                recoverable_replicas[vo][site][rse_expr] = {}
             # recoverable_replicas should now look like this:
             # {vo1: {site1: {rse1: [], rse_2: [], ...}, site2: {...}  },    vo2: {...}}
-
-            suspicious_replicas = get_suspicious_files(rse, filter={'vo': vo}, **getfileskwargs)
+            print("RSE: ", rse_expr)
+            suspicious_replicas = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs)
 
             # Not all RSEs have suspicious replicas on them. However, they should still be added to the list as makes it possibl to
             # check if a site has problems (by checking whether all the RSEs on it have a certain number of suspicious files).
@@ -308,7 +323,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
                 for replica in suspicious_replicas:
                     if vo == replica['scope'].vo:
                         scope = replica['scope']
-                        name = replica['name']
+                        rep_name = replica['name']
                         # rse = replica['rse']
                         rse_id = replica['rse_id']
 
@@ -317,11 +332,12 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
 
                         # for each suspicious replica, we get its surl through the list_replicas function
                         surl_not_found = True
-                        for rep in list_replicas([{'scope': scope, 'name': name}]):
+                        for rep in list_replicas([{'scope': scope, 'name': rep_name}]):
                             for rse_ in rep['rses']:
                                 if rse_ == rse_id: # What is he difference between rse and rse_id?
                                     # Add the surl to the list
-                                    recoverable_replicas[vo][site][rse][name] = {'scope':scope, 'surl':rep['rses'][site][0]}
+                                    recoverable_replicas[vo][site][rse_expr][rep_name] = {'scope':scope, 'surl':rep['rses'][rse_][0]}
+                                    print("surl found: %s" % recoverable_replicas[vo][site][rse_expr][rep_name]['surl'])
                                     surl_not_found = False
                 # if surl_not_found:
                     # cnt_surl_not_found += 1
@@ -334,7 +350,11 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
 
 
         # Not sure what this returns
-        down_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites')
+        #print(headers)
+        #down_sites = urllib.request.urlopen("https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites")
+        #down_sites = requests.get('https://atlas-cric.cern.ch/api/core/downtime/query/?json&preset=sites', headers=headers, verify=False)
+        #print(down_sites)
+        #print(down_sites.json())
 
         for site in recoverable_replicas[vo].keys():
         # Deleting dictionary elements whilst iterating over the dict will cause an error
@@ -345,8 +365,8 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
             if site in down_sites.json():
                 del recoverable_replicas[vo][site]
             clean_rses = 0
-            for rse in site:
-                if len(rse) == 0: # If RSE has no suspicious replicas
+            for rse_ in site:
+                if len(rse_) == 0: # If RSE has no suspicious replicas
                     clean_rses += 1
             # Remove sites where all RSEs have no suspicious replicas
             if len(site) == clean_rses:
@@ -363,16 +383,16 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
         for site in recoverable_replicas[vo]:
             count_problematic_rse = 0 # Number of RSEs with less than *limit_suspicious_files_on_rse* suspicious replicas
             list_problematic_rses = [] # List of RSEs that are deemed problematic
-            for rse in site:
-                if len(rse) > limit_suspicious_files_on_rse:
+            for rse_ in site:
+                if len(rse_) > limit_suspicious_files_on_rse:
                     count_problematic_rse += 1
                     list_problematic_rses.append(rse.key())
             if len(site) == count_problematic_rse:
                 # Site has a problem
                 # Set all of the replicas on the site as TEMPORARY_UNAVAILABLE
-                for rse in site:
+                for rse_ in site:
                     surls_list = []
-                    for replica in rse: # replica = replica1_name:{scope:scope1, surl:surl1}
+                    for replica in rse_: # replica = replica1_name:{scope:scope1, surl:surl1}
                         surls_list.append(replica['surl'])
 
                     # REMOVED FOR TEST:
@@ -411,13 +431,13 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
 
 
             # Only specific RSEs of a site have a problem. Check RSEs individually
-            for rse in list_problematic_rses: # Here, "rse" is only the name of the replica, it doesn't refer to the dictionary
-                rse_type = rse.split('_')[-1]
+            for rse_ in list_problematic_rses: # Here, "rse_" is only the name of the replica, it doesn't refer to the dictionary
+                rse_type = rse_.split('_')[-1]
                 if (rse_type == "SCRATCHDISK") or (rse_type == "LOCALGROUPDISK"): # These storage types need to be handled differently
                     # To be implemented
                     continue
 
-                if len(recoverable_replicas[vo][site][rse]) > limit_suspicious_files_on_rse: # If too many suspicious replicas, RSE is problematic
+                if len(recoverable_replicas[vo][site][rse_]) > limit_suspicious_files_on_rse: # If too many suspicious replicas, RSE is problematic
 
                     # REMOVED FOR TEST:
                     # add_bad_pfns(pfns=recoverable_replicas[vo][site][rse], account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
@@ -426,7 +446,7 @@ def recover_suspicious_replicas(vos, younger_than, nattempts):
 
                 # Check replicas individually
                 # else:
-                #     for replica in recoverable_replicas[vo][site][rse]:
+                #     for replica in recoverable_replicas[vo][site][rse_]:
                 #         # Beginning of file name indicates what type of file the replica is
                 #         file_type = replica.key().split('.')[0]
                 #         scope = replica['scope']
