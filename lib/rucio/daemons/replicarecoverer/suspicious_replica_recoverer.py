@@ -279,7 +279,6 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
         rse_list = list_rses()
         # Remove some RSEs from the list that don't fulfill specific criteria
         rse_list[:] = [rse for rse in rse_list if ((rse['deleted'] == False) and (rse['rse'] not in {"MOCK-POSIX", "ru-PNPI_XCACHE", "ru-PNPI_XCACHE_LOCAL", "ru-PNPI_XCACHE_NODES"}) and (rse['rse'].split("_")[-1] in {"DATADISK", "SCRATCHDISK"}))]
-        print(rse_list)
 
         for rse in rse_list:
             rse_expr = rse['rse']
@@ -327,16 +326,21 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
             # recoverable_replicas should now look like this: {vo1: {site1: {rse1: [surl1, surl2, ...], rse_2: [...], ...}, site2: {...}  },    vo2: {...}}
             # At this point in time there will be RSEs with empty lists, as they have no suspicious replicas
 
-        for site in recoverable_replicas[vo].keys():
+        for site in list(recoverable_replicas[vo].keys()):
             print("Site name: ", site)
         # Check if a site is in the list of known unavailable sites. If it is, remove it from the dictionary (should probably also send some sort of logging warning, as
         # replicas on a site that is down during a scheduled time shouldn't be labeled as suspicious when there is an attempt to access them).
             clean_rses = 0
-            for rse in recoverable_replicas[vo][site]:
-                if len(rse) == 0: # If RSE has no suspicious replicas
+            for rse_key, rse_value in recoverable_replicas[vo][site].items():
+                # print(rse)
+                # print(len(rse_value))
+                if len(rse_value) == 0: # If RSE has no suspicious replicas
                     clean_rses += 1
             # Remove sites where all RSEs have no suspicious replicas
+            # print("len: ", len(recoverable_replicas[vo][site]))
+            # print("clean: ", clean_rses)
             if len(recoverable_replicas[vo][site]) == clean_rses:
+                print("Site %s is clean; deleting" % site)
                 # Site is clean; it can be removed from the dictionary
                 del recoverable_replicas[vo][site]
 
@@ -345,20 +349,28 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
         # problematic, meaning the replicas are marked as TEMPORARY_UNAVAILABLE and a ticket is sent to the site managers.
         # If an RSE has more than limit_suspicious_files_on_rse suspicious files, it is marked as problematic
 
-        for site in recoverable_replicas[vo].keys():
+        for site in list(recoverable_replicas[vo].keys()):
+            print("test site: ", site)
             count_problematic_rse = 0 # Number of RSEs with less than *limit_suspicious_files_on_rse* suspicious replicas
             list_problematic_rses = [] # List of RSEs that are deemed problematic
-            for rse in recoverable_replicas[vo][site]:
-                if len(rse) > limit_suspicious_files_on_rse:
+            for rse_key, rse_value in recoverable_replicas[vo][site].items():
+                if len(rse_value) > limit_suspicious_files_on_rse:
                     count_problematic_rse += 1
-                    list_problematic_rses.append(rse.key())
-            if len(recoverable_replicas[vo][site]) == count_problematic_rse:
+                    print("RSE ", rse_key, " has more than 5 suspicious replicas")
+                    list_problematic_rses.append(rse_key)
+            print("len(values): ", len(recoverable_replicas[vo][site].values()))
+            print("Count probl. RSEs: ", count_problematic_rse)
+            if len(recoverable_replicas[vo][site].values()) == count_problematic_rse:
                 # Site has a problem
                 # Set all of the replicas on the site as TEMPORARY_UNAVAILABLE
-                for rse in site:
+                for rse_key, rse_value in recoverable_replicas[vo][site].items():
                     surls_list = []
-                    for replica in rse:
-                        surls_list.append(replica['surl'])
+                    for replica_key, replica_value in rse_value.items():
+                        print("replica key: ", replica_key)
+                        print("replica_value surl: ", replica_value['surl'])
+                        surls_list.append(replica_value['surl'])
+                # print("Site: ", site)
+                # print(surls_list)
                     # REMOVED FOR TEST:
                     # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE) # What is an account in this case?
                 print("All RSEs on site %s are problematic. Send a Jira ticket for the site (to be implemented)." % site)
@@ -372,8 +384,10 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
                     # RSE has a problem
                     # Set all of the replicas on the RSE as TEMPORARY_UNAVAILABLE
                     surls_list = []
-                    for replica in recoverable_replicas[vo][site][rse]:
-                        surls_list.append(replica['surl'])
+                    for replica_value in recoverable_replicas[vo][site][rse].values():
+                        surls_list.append(replica_value['surl'])
+                    # print("surls_list: ")
+                    # print(surls_list)
                     # REMOVED FOR TEST:
                     # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
                     print("RSE %s of site %s is problematic. Send a Jira ticket for the RSE (to be implemented)." % (rse, site))
@@ -382,7 +396,7 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
 
     # recoverable_replicas should now only have RSEs that have less than *limit_suspicious_files_on_rse* suspicious replicas.
     # These replicas need to be dealt with individually
-    print(recoverable_replicas)
+    # print(recoverable_replicas)
     return recoverable_replicas
 
 
