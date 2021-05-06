@@ -340,7 +340,7 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
             # print("len: ", len(recoverable_replicas[vo][site]))
             # print("clean: ", clean_rses)
             if len(recoverable_replicas[vo][site]) == clean_rses:
-                print("Site %s is clean; deleting" % site)
+                print("Site %s is clean; removing" % site)
                 # Site is clean; it can be removed from the dictionary
                 del recoverable_replicas[vo][site]
 
@@ -350,24 +350,24 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
         # If an RSE has more than limit_suspicious_files_on_rse suspicious files, it is marked as problematic
 
         for site in list(recoverable_replicas[vo].keys()):
-            print("test site: ", site)
+            print("Checking if %s is problematic" % site)
             count_problematic_rse = 0 # Number of RSEs with less than *limit_suspicious_files_on_rse* suspicious replicas
             list_problematic_rses = [] # List of RSEs that are deemed problematic
             for rse_key, rse_value in recoverable_replicas[vo][site].items():
                 if len(rse_value) > limit_suspicious_files_on_rse:
                     count_problematic_rse += 1
-                    print("RSE ", rse_key, " has more than 5 suspicious replicas")
+                    print("%s has more than 5 suspicious replicas" % rse_key)
                     list_problematic_rses.append(rse_key)
-            print("len(values): ", len(recoverable_replicas[vo][site].values()))
-            print("Count probl. RSEs: ", count_problematic_rse)
+            # print("len(values): ", len(recoverable_replicas[vo][site].values()))
+            # print("Count probl. RSEs: ", count_problematic_rse)
             if len(recoverable_replicas[vo][site].values()) == count_problematic_rse:
                 # Site has a problem
                 # Set all of the replicas on the site as TEMPORARY_UNAVAILABLE
                 for rse_key, rse_value in recoverable_replicas[vo][site].items():
                     surls_list = []
                     for replica_key, replica_value in rse_value.items():
-                        print("replica key: ", replica_key)
-                        print("replica_value surl: ", replica_value['surl'])
+                        # print("replica key: ", replica_key)
+                        # print("replica_value surl: ", replica_value['surl'])
                         surls_list.append(replica_value['surl'])
                 # print("Site: ", site)
                 # print(surls_list)
@@ -393,6 +393,8 @@ def check_for_problematic_rses(vos, younger_than, nattempts, limit_suspicious_fi
                     print("RSE %s of site %s is problematic. Send a Jira ticket for the RSE (to be implemented)." % (rse, site))
                     # Remove the RSE from the dictionary as it has been dealt with.
                     del recoverable_replicas[vo][site][rse]
+                else:
+                    print("RSE %s only has %d suspicious replicas" % (rse, len(recoverable_replicas[vo][site][rse])))
 
     # recoverable_replicas should now only have RSEs that have less than *limit_suspicious_files_on_rse* suspicious replicas.
     # These replicas need to be dealt with individually
