@@ -460,16 +460,21 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                             del recoverable_replicas[vo][site][rse]
 
                 # Label remaining suspicious replicas as bad
-                for vo in surls_to_recover:
-                    for rse_id in surls_to_recover[vo]:
+                for site in recoverable_replicas[vo]:
+                    for rse_key, rse_value in recoverable_replicas[vo][site]:
+                        remaining_surls = []
+                        for replica in rse_value:
+                            remaining_surls.append(replica['surl'])
+
+                    # for rse_id in surls_to_recover[vo]:
                         logging.info('replica_recoverer[%i/%i]: ready to declare %i bad replica(s) on %s: %s.',
-                                     worker_number, total_workers, len(surls_to_recover[vo][rse_id]), rse, str(surls_to_recover[vo][rse_id]))
-                        if len(surls_to_recover[vo][rse_id]) > max_replicas_per_rse:
-                            logging.warning('replica_recoverer[%i/%i]: encountered more than %i suspicious replicas (%s) on %s. Please investigate.',
-                                            worker_number, total_workers, max_replicas_per_rse, str(len(surls_to_recover[vo][rse_id])), rse)
-                        else:
-                            # declare_bad_file_replicas(pfns=surls_to_recover[vo][rse_id], reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
-                            logging.info('replica_recoverer[%i/%i]: finished declaring bad replicas on %s.', worker_number, total_workers, rse)
+                                     worker_number, total_workers, len(remaining_surls), rse, str(rse_key))
+                        # if len(surls_to_recover[vo][rse_id]) > max_replicas_per_rse:
+                        #     logging.warning('replica_recoverer[%i/%i]: encountered more than %i suspicious replicas (%s) on %s. Please investigate.',
+                        #                     worker_number, total_workers, max_replicas_per_rse, str(len(surls_to_recover[vo][rse_id])), rse)
+                        # else:
+                            # declare_bad_file_replicas(pfns=remaining_surls, reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
+                        logging.info('replica_recoverer[%i/%i]: finished declaring bad replicas on %s.', worker_number, total_workers, rse_key)
 
 
             # Sticking this here for now, as I'm not sure what the best way to integrate/call this function is yet.
