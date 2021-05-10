@@ -260,7 +260,7 @@ def declare_suspicious_replicas_bad2(once=False, younger_than=3, nattempts=10, r
 
 
 
-def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vos=None, max_replicas_per_rse=100):
+def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vos=None, max_replicas_per_rse=100, limit_suspicious_files_on_rse=5):
 
     """
     Main loop to check for available replicas which are labeled as suspicious
@@ -380,7 +380,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
 
                 for rse in rse_list:
                     rse_expr = rse['rse']
-                    cnt_found_replicas = 0
+                    cnt_surl_not_found = 0
                     site = rse_expr.split('_')[0]
                     if site not in recoverable_replicas[vo]:
                         recoverable_replicas[vo][site] = {}
@@ -410,7 +410,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                                     logging.warning('replica_recoverer[%i/%i]: skipping suspicious replica %s on %s, no surls were found.', worker_number, total_workers, name, rse_expr)
 
                     logging.info('replica_recoverer[%i/%i]: suspicious replica query took %.2f seconds on %s, total of %i/%i replicas were found.',
-                                 worker_number, total_workers, time_stamp - start, rse_expr, len(suspicious_replicas) - cnt_surl_not_found, len(suspicious_replicas))
+                                 worker_number, total_workers, time.time() - start, rse_expr, len(suspicious_replicas) - cnt_surl_not_found, len(suspicious_replicas))
 
                 for site in list(recoverable_replicas[vo].keys()):
                     clean_rses = 0
@@ -459,7 +459,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                             # Remove the RSE from the dictionary as it has been dealt with.
                             del recoverable_replicas[vo][site][rse]
 
-                # Label rmaining suspicious replicas as bad
+                # Label remaining suspicious replicas as bad
                 for vo in surls_to_recover:
                     for rse_id in surls_to_recover[vo]:
                         logging.info('replica_recoverer[%i/%i]: ready to declare %i bad replica(s) on %s: %s.',
