@@ -146,7 +146,7 @@ def declare_suspicious_replicas_bad2(once=False, younger_than=3, nattempts=10, r
             # issuing the heartbeat for a second time to make all workers aware of each other (there is only 1 worker allowed for this daemon)
             heartbeat = live(executable=executable, hostname=socket.gethostname(), pid=os.getpid(), thread=threading.current_thread())
             total_workers = heartbeat['nr_threads']
-            worker_number = heartbeat['assign_thread']
+            worker_number = heartbeat['assign_thread'] + 1
 
             # there is only 1 worker allowed for this daemon
             if total_workers != 1:
@@ -334,7 +334,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
             # issuing the heartbeat for a second time to make all workers aware of each other (there is only 1 worker allowed for this daemon)
             heartbeat = live(executable=executable, hostname=socket.gethostname(), pid=os.getpid(), thread=threading.current_thread())
             total_workers = heartbeat['nr_threads']
-            worker_number = heartbeat['assign_thread']
+            worker_number = heartbeat['assign_thread'] + 1
 
             # there is only 1 worker allowed for this daemon
             if total_workers != 1:
@@ -345,7 +345,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
             start = time.time()
 
             logging.info('replica_recoverer[%i/%i]: Ready to query replicas which were'
-                         + ' reported suspicious in the last %i days at least %i times.',  # NOQA: W503
+                         + ' reported as suspicious in the last %i days at least %i times.',  # NOQA: W503
                          worker_number, total_workers, younger_than, nattempts)
 
             # logging.info('replica_recoverer[%i/%i]: ready to query replicas at RSE %s,'
