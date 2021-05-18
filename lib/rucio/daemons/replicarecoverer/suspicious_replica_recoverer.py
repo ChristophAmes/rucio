@@ -40,24 +40,20 @@ from datetime import datetime, timedelta
 from re import match
 from sys import argv
 
-import rucio.db.sqla.util
-from rucio.common.config import config_get_bool
-from rucio.common.exception import DatabaseException, VONotFound#, InvalidRSEExpression
-from rucio.common.logging import setup_logging
-# from rucio.common.types import InternalAccount
-from rucio.core.heartbeat import live, die, sanity_check
-from rucio.core.monitor import record_counter
-from rucio.core.replica import list_replicas, get_suspicious_files#, declare_bad_file_replicas
-# from rucio.core.rse_expression_parser import parse_expression
-from rucio.core.rse import list_rses
-from rucio.core.vo import list_vos
-# from rucio.db.sqla.constants import BadFilesStatus
-from rucio.db.sqla.util import get_db_time
 from sqlalchemy.exc import DatabaseError
 
+import rucio.db.sqla.util
+from rucio.common.config import config_get_bool
+from rucio.common.exception import DatabaseException, VONotFound
+from rucio.common.logging import setup_logging
+from rucio.core.heartbeat import live, die, sanity_check
+from rucio.core.monitor import record_counter
+from rucio.core.replica import list_replicas, get_suspicious_files
+from rucio.core.rse import list_rses
+from rucio.core.vo import list_vos
+from rucio.db.sqla.util import get_db_time
 
 GRACEFUL_STOP = threading.Event()
-
 
 
 def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vos=None, max_replicas_per_rse=100, limit_suspicious_files_on_rse=5):
@@ -101,7 +97,6 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
             vos = [v['vo'] for v in list_vos()]
         logging.info('replica_recoverer: This instance will work on VO%s: %s' % ('s' if len(vos) > 1 else '', ', '.join([v for v in vos])))
 
-
     sanity_check(executable=executable, hostname=socket.gethostname())
 
     # make an initial heartbeat - expected only one replica-recoverer thread on one node
@@ -144,7 +139,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     recoverable_replicas[vo]={}
                 rse_list = list_rses()
                 # Remove RSEs from the list that have been labeled as deleted or where the RSE expression does not end with "DATADISK" or "SCRATCHDISK"
-                rse_list[:] = [rse for rse in rse_list if ((rse['deleted'] == False) and (rse['rse'].split("_")[-1] in {"DATADISK", "SCRATCHDISK"}))]
+                rse_list[:] = [rse for rse in rse_list if ((rse['deleted'] is False) and (rse['rse'].split("_")[-1] in {"DATADISK", "SCRATCHDISK"}))]
 
                 for rse in rse_list:
                     time_start_rse = time.time()
@@ -270,7 +265,6 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
 
     die(executable=executable, hostname=socket.gethostname(), pid=os.getpid(), thread=threading.current_thread())
     logging.info('replica_recoverer[%i/%i]: Graceful stop done.', worker_number, total_workers)
-
 
 
 
