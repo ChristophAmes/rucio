@@ -22,6 +22,7 @@
 # - Patrick Austin <patrick.austin@stfc.ac.uk>, 2020
 # - Benedikt Ziemons <benedikt.ziemons@cern.ch>, 2020
 # - Thomas Beermann <thomas.beermann@cern.ch>, 2021
+# - Christoph Ames <christoph.ames@cern.ch>, 2021
 
 """
 Suspicious-Replica-Recoverer is a daemon that declares suspicious replicas as bad if they are found available on other RSE.
@@ -138,6 +139,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                 if vo not in recoverable_replicas:
                     recoverable_replicas[vo]={}
                 rse_list = list_rses()
+                logging.debug("DEBUG  List of RSEs: \n", rse_list)
                 # Remove RSEs from the list that have been labeled as deleted or where the RSE expression does not end with "DATADISK" or "SCRATCHDISK"
                 rse_list[:] = [rse for rse in rse_list if ((rse['deleted'] is False) and (rse['rse'].split("_")[-1] in {"DATADISK", "SCRATCHDISK"}))]
 
@@ -151,9 +153,10 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     if rse_expr not in recoverable_replicas[vo][site]:
                         recoverable_replicas[vo][site][rse_expr] = {}
                     suspicious_replicas = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs)
+                    logging.debug('DEBUG  Suspicious replicas on RSE %s: \n' % rse_expr, suspicious_replicas)
 
                     if (rse['availability'] not in {4, 5, 6, 7}) and (len(suspicious_replicas) > 0):
-                        logging.warning("%s is labeled as unavailable, yet is has suspicious replicas. Please investigate." % rse_expr)
+                        logging.warning("replica_recoverer[%i/%i]: %s is labeled as unavailable, yet is has suspicious replicas. Please investigate." % rse_expr)
                         continue
                     if suspicious_replicas:
                         for replica in suspicious_replicas:
@@ -170,22 +173,26 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                                 if surl_not_found:
                                     cnt_surl_not_found += 1
                                     logging.warning('replica_recoverer[%i/%i]: Skipping suspicious replica %s on %s, no surls were found.', worker_number, total_workers, rep_name, rse_expr)
-
+                    logging.debug('DEBUG List of replicas on %s for which the pfns have been found: %s' % (rse_expr, recoverable_replicas[vo][site][rse_expr]))
                     logging.info('replica_recoverer[%i/%i]: Suspicious replica query took %.2f seconds on %s, %i/%i replicas were found.',
                                  worker_number, total_workers, time.time() - time_start_rse, rse_expr, len(suspicious_replicas) - cnt_surl_not_found, len(suspicious_replicas))
                 logging.info('replica_recoverer[%i/%i]: All RSEs have been checked for suspicious replicas. Total time: %.2f seconds.', worker_number, total_workers, time.time() - start)
                 logging.info('replica_recoverer[%i/%i]: Begin check for problematic sites and RSEs.', worker_number, total_workers)
                 time_start_check_probl = time.time()
+
                 for site in list(recoverable_replicas[vo].keys()):
+                    logging.debug('DEBUG  All RSEs and their suspicious replicas on site %s: \n %s', site, recoverable_replicas[vo][site])
                     clean_rses = 0
                     for rse_key, rse_value in recoverable_replicas[vo][site].items():
                         if len(rse_value) == 0:
                             # RSE has no suspicious replicas
                             clean_rses += 1
                     if len(recoverable_replicas[vo][site]) == clean_rses:
+                        logging.info('replica_recoverer[%i/%i]: No RSEs on site %s have suspicious replicas.', worker_number, total_workers, site)
                         del recoverable_replicas[vo][site]
+                        continue
 
-                for site in list(recoverable_replicas[vo].keys()):
+                # for site in list(recoverable_replicas[vo].keys()):
                     count_problematic_rse = 0  # Number of RSEs with less than *limit_suspicious_files_on_rse* suspicious replicas
                     list_problematic_rses = []
                     for rse_key, rse_value in recoverable_replicas[vo][site].items():
@@ -194,22 +201,24 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                             list_problematic_rses.append(rse_key)
                     if len(recoverable_replicas[vo][site].values()) == count_problematic_rse:
                         # All RSEs on the site have been deemed problematic -> site has a problem
-                        # Set all of the replicas on the site as TEMPORARY_UNAVAILABLE
+                        # Mark all of the replicas on the site as TEMPORARY_UNAVAILABLE
                         for rse_key, rse_value in recoverable_replicas[vo][site].items():
                             surls_list = []
                             for replica_key, replica_value in rse_value.items():
                                 surls_list.append(replica_value['surl'])
+                            logging.debug('DEBUG  List of pfns that will be labeled as TEMPORARY_UNAVAILABLE on %s: \n %s', surls_list, rse_key)
                             ###########
                             # REMOVED FOR TEST:
                             # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE) # What is an account in this case?
                             ###########
-                        logging.info("All RSEs on site %s are problematic. Send a Jira ticket for the site (to be implemented)." % site)
+                        logging.info("replica_recoverer[%i/%i]: All RSEs on site %s are problematic. Send a Jira ticket for the site (to be implemented).", worker_number, total_workers, site)
                         # Remove the site from the dictionary as it has been dealt with.
                         del recoverable_replicas[vo][site]
-                        continue  # Move on to next site.
+                        continue
 
                     # Only specific RSEs of a site have too many suspicious replicas and are therefore problematic. Check RSEs individually.
                     for rse in list_problematic_rses:
+                        logging.debug('DEBUG  Suspicious replicas on %s: \n %s', rse, recoverable_replicas[vo][site][rse].values())
                         if len(recoverable_replicas[vo][site][rse].values()) > limit_suspicious_files_on_rse:
                             # RSE has a problem
                             # Set all of the replicas on the RSE as TEMPORARY_UNAVAILABLE
@@ -220,12 +229,12 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                             # REMOVED FOR TEST:
                             # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
                             ###########
-                            logging.info("%s of site %s is problematic. Send a Jira ticket for the RSE (to be implemented)." % (rse, site))
+                            logging.info("replica_recoverer[%i/%i]: %s on site %s is problematic (more than %i suspicious replicas). Send a Jira ticket for the RSE (to be implemented).", worker_number, total_workers, limit_suspicious_files_on_rse, rse, site)
                             # Remove the RSE from the dictionary as it has been dealt with.
                             del recoverable_replicas[vo][site][rse]
-                            continue
+
                 # Label remaining suspicious replicas as bad
-                for site in recoverable_replicas[vo].keys():
+                # for site in recoverable_replicas[vo].keys():
                     for rse_key in list(recoverable_replicas[vo][site].keys()):
                         # Remove remaining RSEs that don't have any suspicious replicas (should only exist for sites that had at least one
                         # RSE with a suspicious replica)
@@ -236,7 +245,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         remaining_surls = []
                         for replica in recoverable_replicas[vo][site][rse_key].values():
                             remaining_surls.append(replica['surl'])
-
+                        logging.debug('DEBUG  %s: Remaining pfns that will be marked BAD: \n %s', rse_key, remaining_surls)
                         logging.info('replica_recoverer[%i/%i]: Ready to declare %i bad replica(s) on %s (RSE id: %s).',
                                      worker_number, total_workers, len(remaining_surls), rse_key, str(rse_id))
                         ###########
