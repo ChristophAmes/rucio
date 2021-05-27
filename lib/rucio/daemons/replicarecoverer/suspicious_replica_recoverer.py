@@ -208,7 +208,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                             surls_list = []
                             for replica_key, replica_value in rse_value.items():
                                 surls_list.append(replica_value['surl'])
-                            logging.debug('List of pfns that will be labeled as TEMPORARY_UNAVAILABLE on %s: \n %s', surls_list, rse_key)
+                            logging.debug('List of pfns that will be labeled as TEMPORARY_UNAVAILABLE on %s: \n %s', rse_key, surls_list)
                             ###########
                             # REMOVED FOR TEST:
                             # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE) # What is an account in this case?
