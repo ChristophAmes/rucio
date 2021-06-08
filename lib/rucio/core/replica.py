@@ -3114,8 +3114,12 @@ def get_suspicious_files(rse_expression, filter=None, **kwargs):
     :param: exclude_states: List of states which eliminates replicas from search result if any of the states in the list
                             was declared for a replica since younger_than date. Allowed values
                             = ['B', 'R', 'D', 'L', 'T', 'S'] (meaning 'BAD', 'RECOVERED', 'DELETED', 'LOST', 'TEMPORARY_UNAVAILABLE', 'SUSPICIOUS').
-    :param: available_elsewhere: If True, only replicas declared in addition as AVAILABLE on another RSE
-                                 than the one in the bad_replicas table will be taken into account. Default value = False.
+    # :param: available_elsewhere: If True, only replicas declared in addition as AVAILABLE on another RSE
+    #                              than the one in the bad_replicas table will be taken into account. Default value = False.
+    :param: available_elsewhere: Default: 0, all suspicious replicas are returned.
+                                 If 1, only replicas that additionally have copies declared as AVAILABLE on at least one other RSE
+                                 than the one in the bad_replicas table will be taken into account.
+                                 If 2, only replicas that do not have another copy marked as AVAILABLE on another RSE will be taken into account.
     :param: is_suspicious: If True, only replicas declared as SUSPICIOUS in bad replicas table will be taken into account. Default value = False.
     :param session: The database session in use. Default value = None.
 
@@ -3127,7 +3131,7 @@ def get_suspicious_files(rse_expression, filter=None, **kwargs):
     nattempts = kwargs.get("nattempts", 0)
     session = kwargs.get("session", None)
     exclude_states = kwargs.get("exclude_states", ['B', 'R', 'D'])
-    available_elsewhere = kwargs.get("available_elsewhere", False)
+    available_elsewhere = kwargs.get("available_elsewhere", 0)
     is_suspicious = kwargs.get("is_suspicious", False)
 
     # only for the 2 web api used parameters, checking value types and assigning the default values
@@ -3162,8 +3166,24 @@ def get_suspicious_files(rse_expression, filter=None, **kwargs):
         query.filter(bad_replicas_alias.state == BadFilesStatus.SUSPICIOUS)
     if rse_clause:
         query = query.filter(or_(*rse_clause))
-    if available_elsewhere:
+    # if available_elsewhere:
+    #     available_replica = exists(select([1]).where(and_(replicas_alias.state == ReplicaState.AVAILABLE,
+    #                                                       replicas_alias.scope == bad_replicas_alias.scope,
+    #                                                       replicas_alias.name == bad_replicas_alias.name,
+    #                                                       replicas_alias.rse_id != bad_replicas_alias.rse_id)))
+    #     query = query.filter(available_replica)
+
+    # Only return replicas that have at least one copy on another RSE
+    if available_elsewhere == 1:
         available_replica = exists(select([1]).where(and_(replicas_alias.state == ReplicaState.AVAILABLE,
+                                                          replicas_alias.scope == bad_replicas_alias.scope,
+                                                          replicas_alias.name == bad_replicas_alias.name,
+                                                          replicas_alias.rse_id != bad_replicas_alias.rse_id)))
+        query = query.filter(available_replica)
+
+    # Only return replicas that are the last remaining copy
+    if available_elsewhere == 2:
+        available_replica = ~exists(select([1]).where(and_(replicas_alias.state == ReplicaState.AVAILABLE,
                                                           replicas_alias.scope == bad_replicas_alias.scope,
                                                           replicas_alias.name == bad_replicas_alias.name,
                                                           replicas_alias.rse_id != bad_replicas_alias.rse_id)))

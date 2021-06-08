@@ -59,7 +59,7 @@ GRACEFUL_STOP = threading.Event()
 
 logging.basicConfig(filename='suspicious_replica_recoverer.log', level=logging.DEBUG)
 
-def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vos=None, max_replicas_per_rse=100, limit_suspicious_files_on_rse=5):
+def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vos=None, limit_suspicious_files_on_rse=5):
     """
     Main loop to check for available replicas which are labeled as suspicious
 
@@ -75,8 +75,9 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
     :param rse_expression: Search for suspicious replicas on RSEs matching the 'rse_expression'.
     :param vos: VOs on which to look for RSEs. Only used in multi-VO mode.
                 If None, we either use all VOs if run from "def",
-    :param max_replicas_per_rse: Maximum number of replicas which are allowed to be labeled as bad per RSE.
-                                 If more is found, processing is skipped and warning is printed.
+    :param limit_suspicious_files_on_rse: Maximum number of suspicious replicas on an RSE before that RSE
+                                          is considered problematic and the suspicious replicas on that RSE
+                                          are labeled as 'TEMPORARY_UNAVAILABLE'.
     :returns: None
     """
 
@@ -129,11 +130,17 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                          + ' reported as suspicious in the last %i days at least %i times.',  # NOQA: W503
                          worker_number, total_workers, younger_than, nattempts)
 
-            getfileskwargs = {'younger_than': younger_than,
-                              'nattempts': nattempts,
-                              'exclude_states': ['B', 'R', 'D', 'L', 'T'],
-                              'available_elsewhere': True,
-                              'is_suspicious': True}
+            getfileskwargs_avail_elsewhere = {'younger_than': younger_than,
+                                              'nattempts': nattempts,
+                                              'exclude_states': ['B', 'R', 'D', 'L', 'T'],
+                                              'available_elsewhere': 1,
+                                              'is_suspicious': True}
+
+            getfileskwargs_last_copy = {'younger_than': younger_than,
+                                              'nattempts': nattempts,
+                                              'exclude_states': ['B', 'R', 'D', 'L', 'T'],
+                                              'available_elsewhere': 2,
+                                              'is_suspicious': True}
 
             for vo in vos:
                 logging.info('replica_recoverer[%i/%i]: Start replica recovery for VO: %s', worker_number, total_workers, vo)
@@ -154,14 +161,15 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         recoverable_replicas[vo][site] = {}
                     if rse_expr not in recoverable_replicas[vo][site]:
                         recoverable_replicas[vo][site][rse_expr] = {}
-                    suspicious_replicas = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs)
+                    suspicious_replicas_avail_elsewhere = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_avail_elsewhere)
+                    suspicious_replicas_last_copy = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_last_copy)
                     logging.debug('Suspicious replicas on RSE %s: \n %s', rse_expr, suspicious_replicas)
 
                     if (rse['availability'] not in {4, 5, 6, 7}) and (len(suspicious_replicas) > 0):
                         logging.warning("replica_recoverer[%i/%i]: %s is labeled as unavailable, yet is has suspicious replicas. Please investigate." % rse_expr)
                         continue
-                    if suspicious_replicas:
-                        for replica in suspicious_replicas:
+                    if suspicious_replicas_avail_elsewhere:
+                        for replica in suspicious_replicas_avail_elsewhere:
                             if vo == replica['scope'].vo:
                                 scope = replica['scope']
                                 rep_name = replica['name']
@@ -170,7 +178,22 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                                 for rep in list_replicas([{'scope': scope, 'name': rep_name}]):
                                     for rse_ in rep['rses']:
                                         if rse_ == rse_id:
-                                            recoverable_replicas[vo][site][rse_expr][rep_name] = {'name': rep_name, 'rse_id': rse_id, 'scope': scope, 'surl': rep['rses'][rse_][0]}
+                                            recoverable_replicas[vo][site][rse_expr][rep_name] = {'name': rep_name, 'rse_id': rse_id, 'scope': scope, 'surl': rep['rses'][rse_][0], 'available_elsewhere': True}
+                                            surl_not_found = False
+                                if surl_not_found:
+                                    cnt_surl_not_found += 1
+                                    logging.warning('replica_recoverer[%i/%i]: Skipping suspicious replica %s on %s, no surls were found.', worker_number, total_workers, rep_name, rse_expr)
+                    if suspicious_replicas_last_copy:
+                        for replica in suspicious_replicas_last_copy:
+                            if vo == replica['scope'].vo:
+                                scope = replica['scope']
+                                rep_name = replica['name']
+                                rse_id = replica['rse_id']
+                                surl_not_found = True
+                                for rep in list_replicas([{'scope': scope, 'name': rep_name}]):
+                                    for rse_ in rep['rses']:
+                                        if rse_ == rse_id:
+                                            recoverable_replicas[vo][site][rse_expr][rep_name] = {'name': rep_name, 'rse_id': rse_id, 'scope': scope, 'surl': rep['rses'][rse_][0], 'available_elsewhere': False}
                                             surl_not_found = False
                                 if surl_not_found:
                                     cnt_surl_not_found += 1
@@ -246,7 +269,9 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         rse_id = list(recoverable_replicas[vo][site][rse_key].values())[0]['rse_id']
                         remaining_surls = []
                         for replica in recoverable_replicas[vo][site][rse_key].values():
-                            remaining_surls.append(replica['surl'])
+                            if replica['available_elsewhere'] == True:
+                                # Only label replicas as bad if there are other copies on at least one other RSE
+                                remaining_surls.append(replica['surl'])
                         logging.debug('(%s) Remaining pfns that will be marked BAD: \n %s', rse_key, remaining_surls)
                         logging.info('replica_recoverer[%i/%i]: Ready to declare %i bad replica(s) on %s (RSE id: %s).',
                                      worker_number, total_workers, len(remaining_surls), rse_key, str(rse_id))
@@ -279,7 +304,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
 
 
 
-def run(once=False, younger_than=3, nattempts=10, rse_expression='MOCK', vos=None, max_replicas_per_rse=100):
+def run(once=False, younger_than=3, nattempts=10, rse_expression='MOCK', vos=None, limit_suspicious_files_on_rse=5):
     """
     Starts up the Suspicious-Replica-Recoverer threads.
     """
@@ -298,13 +323,15 @@ def run(once=False, younger_than=3, nattempts=10, rse_expression='MOCK', vos=Non
     sanity_check(executable='rucio-replica-recoverer', hostname=socket.gethostname())
 
     if once:
-        declare_suspicious_replicas_bad(once, younger_than, nattempts, vos, max_replicas_per_rse)
+        declare_suspicious_replicas_bad(once, younger_than, nattempts, vos, limit_suspicious_files_on_rse)
     else:
         logging.info('Suspicious file replicas recovery starting 1 worker.')
         t = threading.Thread(target=declare_suspicious_replicas_bad,
-                             kwargs={'once': once, 'younger_than': younger_than,
+                             kwargs={'once': once,
+                                     'younger_than': younger_than,
                                      'nattempts': nattempts,
-                                     'vos': vos, 'max_replicas_per_rse': max_replicas_per_rse})
+                                     'vos': vos,
+                                     'limit_suspicious_files_on_rse': limit_suspicious_files_on_rse})
         t.start()
         logging.info('waiting for interrupts')
 
