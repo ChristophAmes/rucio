@@ -3180,15 +3180,15 @@ def get_suspicious_files(rse_expression, filter=None, **kwargs):
                                                           replicas_alias.name == bad_replicas_alias.name,
                                                           replicas_alias.rse_id != bad_replicas_alias.rse_id)))
         query = query.filter(available_replica)
-
+        
     # Only return replicas that are the last remaining copy
     if available_elsewhere == 2:
-        available_replica = ~exists(select([1]).where(and_(replicas_alias.state == ReplicaState.AVAILABLE,
-                                                          replicas_alias.scope == bad_replicas_alias.scope,
+        last_replica = ~exists(select([1]).where(and_(replicas_alias.state == ReplicaState.AVAILABLE,
+	                                                  replicas_alias.scope == bad_replicas_alias.scope,
                                                           replicas_alias.name == bad_replicas_alias.name,
                                                           replicas_alias.rse_id != bad_replicas_alias.rse_id)))
-        query = query.filter(available_replica)
-
+        query = query.filter(last_replica)
+    
     # it is required that the selected replicas
     # do not occur as BAD/DELETED/LOST/RECOVERED/...
     # in the bad_replicas table during the same time window.
@@ -3202,7 +3202,7 @@ def get_suspicious_files(rse_expression, filter=None, **kwargs):
     # finally, the results are grouped by RSE, scope, name and required to have
     # at least 'nattempts' occurrences in the result of the query per replica
     query_result = query.group_by(models.RSEFileAssociation.rse_id, bad_replicas_alias.scope, bad_replicas_alias.name).having(func.count() > nattempts).all()
-    # print(query)
+    
     # translating the rse_id to RSE name and assembling the return list of dictionaries
     result = []
     rses = {}
@@ -3211,7 +3211,7 @@ def get_suspicious_files(rse_expression, filter=None, **kwargs):
             rse = get_rse_name(rse_id=rse_id, session=session)
             rses[rse_id] = rse
         result.append({'scope': scope, 'name': name, 'rse': rses[rse_id], 'rse_id': rse_id, 'cnt': cnt, 'created_at': created_at})
-
+    
     return result
 
 

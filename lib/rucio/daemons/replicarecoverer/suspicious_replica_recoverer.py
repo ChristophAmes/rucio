@@ -49,7 +49,14 @@ from rucio.common.exception import DatabaseException, VONotFound
 from rucio.common.logging import setup_logging
 from rucio.core.heartbeat import live, die, sanity_check
 from rucio.core.monitor import record_counter
+#from rucio.core.replica import list_replicas, get_suspicious_files
+
+#import rucio.core.replica
 from rucio.core.replica import list_replicas, get_suspicious_files
+from importlib import reload
+reload(rucio.core.replica)
+#from rucio.core.replica import list_replicas, get_suspicious_files
+
 from rucio.core.rse import list_rses
 from rucio.core.vo import list_vos
 from rucio.db.sqla.util import get_db_time
@@ -57,7 +64,7 @@ from rucio.db.sqla.util import get_db_time
 GRACEFUL_STOP = threading.Event()
 
 
-logging.basicConfig(filename='suspicious_replica_recoverer.log', level=logging.DEBUG)
+logging.basicConfig(filename='output_suspicious_replica_recoverer.log', level=logging.DEBUG)
 
 def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vos=None, limit_suspicious_files_on_rse=5):
     """
@@ -163,10 +170,10 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         recoverable_replicas[vo][site][rse_expr] = {}
                     suspicious_replicas_avail_elsewhere = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_avail_elsewhere)
                     suspicious_replicas_last_copy = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_last_copy)
-                    logging.debug('Suspicious replicas on RSE %s: \n %s', rse_expr, suspicious_replicas)
+                    logging.debug('Suspicious replicas on RSE %s: \n Replicas with copies on other RSEs: \n %s \n Replicas that are the last remaining copy: \n %s ', rse_expr, suspicious_replicas_avail_elsewhere, suspicious_replicas_last_copy)
 
-                    if (rse['availability'] not in {4, 5, 6, 7}) and (len(suspicious_replicas) > 0):
-                        logging.warning("replica_recoverer[%i/%i]: %s is labeled as unavailable, yet is has suspicious replicas. Please investigate." % rse_expr)
+                    if (rse['availability'] not in {4, 5, 6, 7}) and ((len(suspicious_replicas_avail_elsewhere) > 0) or (len(suspicious_replicas_last_copy) > 0)):
+                        logging.warning("replica_recoverer[%i/%i]: %s is not available (availability: %i), yet is has suspicious replicas. Please investigate. \n", worker_number, total_workers, rse_expr, rse['availability'])
                         continue
                     if suspicious_replicas_avail_elsewhere:
                         for replica in suspicious_replicas_avail_elsewhere:
@@ -199,7 +206,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                                     cnt_surl_not_found += 1
                                     logging.warning('replica_recoverer[%i/%i]: Skipping suspicious replica %s on %s, no surls were found.', worker_number, total_workers, rep_name, rse_expr)
                     logging.info('replica_recoverer[%i/%i]: Suspicious replica query took %.2f seconds on %s, %i/%i replicas were found.',
-                                 worker_number, total_workers, time.time() - time_start_rse, rse_expr, len(suspicious_replicas) - cnt_surl_not_found, len(suspicious_replicas))
+                                 worker_number, total_workers, time.time() - time_start_rse, rse_expr, len(suspicious_replicas_avail_elsewhere) + len(suspicious_replicas_last_copy) - cnt_surl_not_found, len(suspicious_replicas_avail_elsewhere) + len(suspicious_replicas_last_copy))
                     logging.debug('List of replicas on %s for which the pfns have been found: %s \n' % (rse_expr, recoverable_replicas[vo][site][rse_expr]))
                 logging.info('replica_recoverer[%i/%i]: All RSEs have been checked for suspicious replicas. Total time: %.2f seconds.', worker_number, total_workers, time.time() - start)
                 logging.info('replica_recoverer[%i/%i]: Begin check for problematic sites and RSEs.', worker_number, total_workers)
