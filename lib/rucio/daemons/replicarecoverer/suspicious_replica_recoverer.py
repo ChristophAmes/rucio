@@ -175,6 +175,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     if (rse['availability'] not in {4, 5, 6, 7}) and ((len(suspicious_replicas_avail_elsewhere) > 0) or (len(suspicious_replicas_last_copy) > 0)):
                         logging.warning("replica_recoverer[%i/%i]: %s is not available (availability: %i), yet is has suspicious replicas. Please investigate. \n", worker_number, total_workers, rse_expr, rse['availability'])
                         continue
+
                     if suspicious_replicas_avail_elsewhere:
                         for replica in suspicious_replicas_avail_elsewhere:
                             if vo == replica['scope'].vo:
@@ -190,6 +191,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                                 if surl_not_found:
                                     cnt_surl_not_found += 1
                                     logging.warning('replica_recoverer[%i/%i]: Skipping suspicious replica %s on %s, no surls were found.', worker_number, total_workers, rep_name, rse_expr)
+
                     if suspicious_replicas_last_copy:
                         for replica in suspicious_replicas_last_copy:
                             if vo == replica['scope'].vo:
@@ -205,12 +207,17 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                                 if surl_not_found:
                                     cnt_surl_not_found += 1
                                     logging.warning('replica_recoverer[%i/%i]: Skipping suspicious replica %s on %s, no surls were found.', worker_number, total_workers, rep_name, rse_expr)
+
                     logging.info('replica_recoverer[%i/%i]: Suspicious replica query took %.2f seconds on %s, %i/%i replicas were found.',
                                  worker_number, total_workers, time.time() - time_start_rse, rse_expr, len(suspicious_replicas_avail_elsewhere) + len(suspicious_replicas_last_copy) - cnt_surl_not_found, len(suspicious_replicas_avail_elsewhere) + len(suspicious_replicas_last_copy))
                     logging.debug('List of replicas on %s for which the pfns have been found: %s \n' % (rse_expr, recoverable_replicas[vo][site][rse_expr]))
+
                 logging.info('replica_recoverer[%i/%i]: All RSEs have been checked for suspicious replicas. Total time: %.2f seconds.', worker_number, total_workers, time.time() - start)
                 logging.info('replica_recoverer[%i/%i]: Begin check for problematic sites and RSEs.', worker_number, total_workers)
                 time_start_check_probl = time.time()
+
+
+                remaining_files_no_copy = []
 
                 for site in list(recoverable_replicas[vo].keys()):
                     logging.debug('All RSEs (%i) and their suspicious replicas on site %s: \n %s', len(recoverable_replicas[vo][site]), site, recoverable_replicas[vo][site])
@@ -274,19 +281,57 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                             del recoverable_replicas[vo][site][rse_key]
                             continue
                         rse_id = list(recoverable_replicas[vo][site][rse_key].values())[0]['rse_id']
-                        remaining_surls = []
+                        files_to_be_declared_bad = []
                         for replica in recoverable_replicas[vo][site][rse_key].values():
                             if replica['available_elsewhere'] == True:
-                                # Only label replicas as bad if there are other copies on at least one other RSE
-                                remaining_surls.append(replica['surl'])
-                        logging.debug('(%s) Remaining pfns that will be marked BAD: \n %s', rse_key, remaining_surls)
+                                # Replicas with other copies on at least one other RSE can safely be labeled as bad
+                                files_to_be_declared_lost.append(replica['surl'])
+                            if replica['available_elsewhere'] == False:
+                                # Don't keep log files or user files
+                                if (replica['name'].startswith("log.")) or (replica['name'].startswith("user")):
+                                    files_to_be_declared_lost.append(replica['surl'])
+                                # Save remaining replicas that don't have another copy in a list for further inspection.
+                                else:
+                                    remaining_files_no_copy.append(replica)
+                        logging.debug('(%s) Remaining pfns that will be marked BAD: \n %s', rse_key, files_to_be_declared_bad)
                         logging.info('replica_recoverer[%i/%i]: Ready to declare %i bad replica(s) on %s (RSE id: %s).',
-                                     worker_number, total_workers, len(remaining_surls), rse_key, str(rse_id))
+                                     worker_number, total_workers, len(files_to_be_declared_bad), rse_key, str(rse_id))
                         ###########
                         # REMOVED FOR TEST:
-                        # declare_bad_file_replicas(pfns=remaining_surls, reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
+                        # declare_bad_file_replicas(pfns=files_to_be_declared_bad, reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
                         ###########
                         logging.info('replica_recoverer[%i/%i]: Finished declaring bad replicas on %s.\n', worker_number, total_workers, rse_key)
+
+                    # Sorting remaining_files_no_copy by file types
+                    MC_files = []
+                    MC_AOD_counter = 0
+                    MC_DAOD_counter = 0
+                    data_files = []
+                    data_AOD_counter = 0
+                    data_DAOD_counter = 0
+                    for replica in remaining_files_no_copy:
+                        if replica['scope'].startswith("mc"):
+                            MC_files.append(replica)
+                            if replica['name'].startswith("DAOD_")
+                                MC_DAOD_counter += 1
+                            if replica['name'].startswith("AOD_")
+                                MC_AOD_counter += 1
+                        if replica['scope'].startswith("data"):
+                            data_files.append(replica)
+                            if replica['name'].startswith("DAOD_")
+                                data_DAOD_counter += 1
+                            if replica['name'].startswith("AOD_")
+                                data_AOD_counter += 1
+
+                    print("Number of MC files: ", len(MC_files))
+                    print("Number of MC files that are AODs: ", MC_AOD_counter)
+                    print("Number of MC files that are DAODs: ", MC_DAOD_counter)
+                    print(" ")
+                    print("Number of data files: ", len(data_files))
+                    print("Number of data files that are AODs: ", data_AOD_counter)
+                    print("Number of data files that are DAODs: ", data_DAOD_counter)
+
+
 
                 logging.info('replica_recoverer[%i/%i]: Finished checking for problematic sites and RSEs. Total time: %.2f seconds.', worker_number, total_workers, time.time() - time_start_check_probl)
 
