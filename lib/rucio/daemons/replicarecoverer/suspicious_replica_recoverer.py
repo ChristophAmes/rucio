@@ -302,44 +302,44 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         ###########
                         logging.info('replica_recoverer[%i/%i]: Finished declaring bad replicas on %s.\n', worker_number, total_workers, rse_key)
 
-                    # Sorting remaining_files_no_copy by file types
-                        MC_files = []
-                        MC_AOD_counter = 0
-                        MC_DAOD_counter = 0
-                        data_files = []
-                        data_AOD_counter = 0
-                        data_DAOD_counter = 0
-                        for replica in remaining_files_no_copy:
-                            if str(replica['scope']).startswith("mc"):
-                                MC_files.append(replica)
-                                if str(replica['name']).startswith("DAOD_"):
-                                    MC_DAOD_counter += 1
-                                if str(replica['name']).startswith("AOD_"):
-                                    MC_AOD_counter += 1
-                            if str(replica['scope']).startswith("data"):
-                                data_files.append(replica)
-                                if str(replica['name']).startswith("DAOD_"):
-                                    data_DAOD_counter += 1
-                                if str(replica['name']).startswith("AOD_"):
-                                    data_AOD_counter += 1
+                # Sorting remaining_files_no_copy by file types
+                MC_files = []
+                MC_AOD_counter = 0
+                MC_DAOD_counter = 0
+                data_files = []
+                data_AOD_counter = 0
+                data_DAOD_counter = 0
+                for replica in remaining_files_no_copy:
+                    if str(replica['scope']).startswith("mc"):
+                        MC_files.append(replica)
+                        if str(replica['name']).startswith("DAOD_"):
+                            MC_DAOD_counter += 1
+                        if str(replica['name']).startswith("AOD_"):
+                            MC_AOD_counter += 1
+                    if str(replica['scope']).startswith("data"):
+                        data_files.append(replica)
+                        if str(replica['name']).startswith("DAOD_"):
+                            data_DAOD_counter += 1
+                        if str(replica['name']).startswith("AOD_"):
+                            data_AOD_counter += 1
 
-                        print(rse_key)
-                        print("Number of MC files: ", len(MC_files))
-                        print("Number of MC files that are AODs: ", MC_AOD_counter)
-                        print("Number of MC files that are DAODs: ", MC_DAOD_counter)
-                        print("Number of data files: ", len(data_files))
-                        print("Number of data files that are AODs: ", data_AOD_counter)
-                        print("Number of data files that are DAODs: ", data_DAOD_counter)
-                        print("")
+                print("Number of MC files: ", len(MC_files))
+                print("Number of MC files that are AODs: ", MC_AOD_counter)
+                print("Number of MC files that are DAODs: ", MC_DAOD_counter)
+                print("Number of data files: ", len(data_files))
+                print("Number of data files that are AODs: ", data_AOD_counter)
+                print("Number of data files that are DAODs: ", data_DAOD_counter)
+                print("")
+
+                print("MC files: \n")
+                for i in MC_files:
+                    print(i)
+
+                print("\ndata files:\n")
+                for i in data_files:
+                    print(i)
 
 
-                print("Number of MC files: ", len(MC_files))                                                                                                                                                                            
-                print("Number of MC files that are AODs: ", MC_AOD_counter)                                                                                                                                                             
-                print("Number of MC files that are DAODs: ", MC_DAOD_counter)                                                                                                                                                           
-                print("Number of data files: ", len(data_files))                                                                                                                                                                        
-                print("Number of data files that are AODs: ", data_AOD_counter)                                                                                                                                                         
-                print("Number of data files that are DAODs: ", data_DAOD_counter)                                                                                                                                                       
-                print("") 
 
                 logging.info('replica_recoverer[%i/%i]: Finished checking for problematic sites and RSEs. Total time: %.2f seconds.', worker_number, total_workers, time.time() - time_start_check_probl)
 
