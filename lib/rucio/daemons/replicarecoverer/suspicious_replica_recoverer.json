@@ -1,0 +1,12 @@
+[
+    {
+        "datatype": "RAW",
+        "action": "hello" 
+    },
+    {
+        "datatype": "AOD", 
+        "action": "bonjour"
+    }
+]
+
+

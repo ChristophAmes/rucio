@@ -41,6 +41,8 @@ from datetime import datetime, timedelta
 from re import match
 from sys import argv
 
+import json
+
 from sqlalchemy.exc import DatabaseError
 
 import rucio.db.sqla.util
@@ -303,9 +305,18 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         logging.info('replica_recoverer[%i/%i]: Finished declaring bad replicas on %s.\n', worker_number, total_workers, rse_key)
 
                 print("\n \n \n")
+                json_file = open("suspicious_replica_recoverer.json")
+                json_data = json.load(json_file)
+                print(json_data)
                 for replica in remaining_files_no_copy:
                     file_metadata = get_metadata(replica["scope"], replica["name"])
                     print("\n", file_metadata)
+                    for i in json_data:
+                        print("i: ", i)
+                        if i["datatype"] == file_metadata["datatype"].split("_")[-1]:
+                            action = i["action"]
+                            print(action)
+                        # read json file, check if there is a policy
 
 
                 # # Sorting remaining_files_no_copy by file types
