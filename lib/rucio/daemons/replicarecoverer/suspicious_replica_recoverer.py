@@ -170,7 +170,9 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     cnt_surl_not_found = 0
                     if rse_expr not in recoverable_replicas[vo]:
                         recoverable_replicas[vo][rse_expr] = {}
+                    # Get a dictionary of the suspicious replicas on the RSE that have available copies on other RSEs
                     suspicious_replicas_avail_elsewhere = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_avail_elsewhere)
+                    # Get the suspicious replicas that are the last remaining copies
                     suspicious_replicas_last_copy = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_last_copy)
                     logging.debug('\n')
                     logging.debug('Suspicious replicas on %s:',rse_expr)
@@ -181,6 +183,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     for i in suspicious_replicas_last_copy:
                         logging.debug(i)
 
+                    # RSEs that aren't available shouldn't have suspicious replicas showing up. Skip to next RSE.
                     if (rse['availability'] not in {4, 5, 6, 7}) and ((len(suspicious_replicas_avail_elsewhere) > 0) or (len(suspicious_replicas_last_copy) > 0)):
                         logging.warning("\nreplica_recoverer[%i/%i]: %s is not available (availability: %i), yet is has suspicious replicas. Please investigate. \n", worker_number, total_workers, rse_expr, rse['availability'])
                         continue
@@ -256,6 +259,9 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                 for rse in list_problematic_rses:
                     logging.info("replica_recoverer[%i/%i]: %s", worker_number, total_workers, rse)
 
+                json_file = open("suspicious_replica_recoverer.json")
+                json_data = json.load(json_file)
+
                 # Label suspicious replicas as bad if they have oher copies on other RSEs (that aren't also marked as suspicious).
                 # If they are the last remaining copies, deal with them differently.
                 for rse_key in list(recoverable_replicas[vo].keys()):
@@ -266,17 +272,35 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     # Get the rse_id by going to one of the suspicious replicas from that RSE and reading it from there
                     rse_id = list(recoverable_replicas[vo][rse_key].values())[0]['rse_id']
                     files_to_be_declared_bad = []
-                    for replica_key, replica_values in recoverable_replicas[vo][rse_key].items():
-                        if replica_values['available_elsewhere'] == True:
+                    for replica_key in list(recoverable_replicas[vo][rse_key].keys()):
+                        if recoverable_replicas[vo][rse_key][replica_key]['available_elsewhere'] == True:
                             # Replicas with other copies on at least one other RSE can safely be labeled as bad
-                            files_to_be_declared_bad.append(replica_values['surl'])
-                        if replica_values['available_elsewhere'] == False:
-                            if (replica_values['name'].startswith("log.")) or (replica_values['name'].startswith("user")):
-                                # Don't keep log files or user files
-                                files_to_be_declared_bad.append(replica_values['surl'])
-                            else:
-                                # Save remaining replicas that don't have another copy in a list for further inspection.
-                                remaining_files_no_copy[replica_key] = replica_values
+                            files_to_be_declared_bad.append(recoverable_replicas[vo][rse_key][replica_key]['surl'])
+                            # Remove replica from dictionary
+                            del recoverable_replicas[vo][rse_key][replica_key]
+                        if recoverable_replicas[vo][rse_key][replica_key]['available_elsewhere'] == False:
+                            # if (recoverable_replicas[vo][rse_key][replica_key]['name'].startswith("log.")) or (recoverable_replicas[vo][rse_key][replica_key]['name'].startswith("user")):
+                            #     # Don't keep log files or user files
+                            #     files_to_be_declared_bad.append(recoverable_replicas[vo][rse_key][replica_key]['surl'])
+                            #     del recoverable_replicas[vo][rse_key][replica_key]
+                            # else:
+
+                            # Save remaining replicas that don't have another copy in a list for further inspection.
+                            file_metadata = get_metadata(replica_values["scope"], replica_values["name"])
+                            print(replica_values["name"])
+                            print(file_metadata["datatype"])
+                            # remaining_files_no_copy[replica_key] = replica_values
+                            for i in json_data:
+                                if file_metadata["datatype"] == None:
+                                    logging.info("File type for %s is None. Skip this replica.", replica_values["name"])
+                                elif i["datatype"] == file_metadata["datatype"].split("_")[-1]:
+                                    action = i["action"]
+                                    if action == "ignore":
+                                        continue
+                                    elif action == "mark bad":
+                                        files_to_be_declared_bad.append(replica_values['surl'])
+
+
 
                     logging.debug('\n\n(%s) Remaining pfns that will be marked BAD:', rse_key)
                     for i in files_to_be_declared_bad:
@@ -290,21 +314,20 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     logging.info('replica_recoverer[%i/%i]: Finished declaring bad replicas on %s.\n', worker_number, total_workers, rse_key)
 
 
-                # Deal with files based on file type
-                json_file = open("suspicious_replica_recoverer.json")
-                json_data = json.load(json_file)
-                for replica_key, replica_values in remaining_files_no_copy.items():
-                    file_metadata = get_metadata(replica_values["scope"], replica_values["name"])
-                    for i in json_data:
-                        if file_metadata["datatype"] == None:
-                            logging.info("File type for %s is None", replica_values["name"])
-                        elif i["datatype"] == file_metadata["datatype"].split("_")[-1]:
-                            action = i["action"]
-                            if action == "ignore":
-                                # Remove file from list, so it doesn't get marked a bad.
-                                continue
-                            elif action == "mark bad":
-                                remaining_files_no_copy_filtered.append(replica_values['surl'])
+                # # Deal with replicas based on file type
+                # json_file = open("suspicious_replica_recoverer.json")
+                # json_data = json.load(json_file)
+                # for replica_key, replica_values in remaining_files_no_copy.items():
+                #     file_metadata = get_metadata(replica_values["scope"], replica_values["name"])
+                #     for i in json_data:
+                #         if file_metadata["datatype"] == None:
+                #             logging.info("File type for %s is None. Skip this replica.", replica_values["name"])
+                #         elif i["datatype"] == file_metadata["datatype"].split("_")[-1]:
+                #             action = i["action"]
+                #             if action == "ignore":
+                #                 continue
+                #             elif action == "mark bad":
+                #                 remaining_files_no_copy_filtered.append(replica_values['surl'])
                 ###########
                 # REMOVED FOR TEST:
                 # declare_bad_file_replicas(pfns=remaining_files_no_copy_filtered, reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
