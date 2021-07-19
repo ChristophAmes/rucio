@@ -230,7 +230,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
 
 
                 list_problematic_rses = []
-                remaining_files_no_copy = []
+                remaining_files_no_copy = {}
                 remaining_files_no_copy_filtered = []
 
                 for rse_key in list(recoverable_replicas[vo].keys()):
@@ -244,7 +244,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
                         ###########
                         logging.info("replica_recoverer[%i/%i]: %s is problematic (more than %i suspicious replicas). Send a Jira ticket for the RSE (to be implemented).\n", worker_number, total_workers, rse_key, limit_suspicious_files_on_rse)
-                        logging.info("replica_recoverer[%i/%i]: The following files on %s have been marked as TEMPORARILY UNAVAILABLE:", rse_key)
+                        logging.info("replica_recoverer[%i/%i]: The following files on %s have been marked as TEMPORARILY UNAVAILABLE:", worker_number, total_workers, rse_key)
                         for rse_values in recoverable_replicas[vo][rse_key].values():
                             logging.info('replica_recoverer[%i/%i]: Scope: %s    Name: %s', worker_number, total_workers, rse_values['scope'], rse_values['name'])
                         # Remove the RSE from the dictionary as it has been dealt with.
@@ -265,17 +265,17 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     # Get the rse_id by going to one of the suspicious replicas on the RSE and reading it from there
                     rse_id = list(recoverable_replicas[vo][rse_key].values())[0]['rse_id']
                     files_to_be_declared_bad = []
-                    for replica in recoverable_replicas[vo][rse_key].values():
-                        if replica['available_elsewhere'] == True:
+                    for replica_key, replica_values in recoverable_replicas[vo][rse_key].items():
+                        if replica_values['available_elsewhere'] == True:
                             # Replicas with other copies on at least one other RSE can safely be labeled as bad
                             files_to_be_declared_bad.append(replica['surl'])
-                        if replica['available_elsewhere'] == False:
+                        if replica_values['available_elsewhere'] == False:
                             # Don't keep log files or user files
-                            if (replica['name'].startswith("log.")) or (replica['name'].startswith("user")):
-                                files_to_be_declared_bad.append(replica['surl'])
+                            if (replica_values['name'].startswith("log.")) or (replica_values['name'].startswith("user")):
+                                files_to_be_declared_bad.append(replica_values['surl'])
                             # Save remaining replicas that don't have another copy in a list for further inspection.
                             else:
-                                remaining_files_no_copy.append(replica)
+                                remaining_files_no_copy[replica_key][replica_values]
 
                     logging.debug('\n\n(%s) Remaining pfns that will be marked BAD:', rse_key)
                     for i in files_to_be_declared_bad:
@@ -310,46 +310,6 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                 # REMOVED FOR TEST:
                 # declare_bad_file_replicas(pfns=remaining_files_no_copy_filtered, reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
                 ###########
-
-                        # read json file, check if there is a policy
-
-
-                # # Sorting remaining_files_no_copy by file types
-                # MC_files = []
-                # MC_AOD_counter = 0
-                # MC_DAOD_counter = 0
-                # data_files = []
-                # data_AOD_counter = 0
-                # data_DAOD_counter = 0
-                # for replica in remaining_files_no_copy:
-                #     if str(replica['scope']).startswith("mc"):
-                #         MC_files.append(replica)
-                #         if str(replica['name']).startswith("DAOD_"):
-                #             MC_DAOD_counter += 1
-                #         if str(replica['name']).startswith("AOD_"):
-                #             MC_AOD_counter += 1
-                #     if str(replica['scope']).startswith("data"):
-                #         data_files.append(replica)
-                #         if str(replica['name']).startswith("DAOD_"):
-                #             data_DAOD_counter += 1
-                #         if str(replica['name']).startswith("AOD_"):
-                #             data_AOD_counter += 1
-                #
-                # print("Number of MC files: ", len(MC_files))
-                # print("Number of MC files that are AODs: ", MC_AOD_counter)
-                # print("Number of MC files that are DAODs: ", MC_DAOD_counter)
-                # print("Number of data files: ", len(data_files))
-                # print("Number of data files that are AODs: ", data_AOD_counter)
-                # print("Number of data files that are DAODs: ", data_DAOD_counter)
-                # print("")
-                #
-                # print("MC files: \n")
-                # for i in MC_files:
-                #     print(i)
-                #
-                # print("\ndata files:\n")
-                # for i in data_files:
-                #     print(i)
 
 
 
