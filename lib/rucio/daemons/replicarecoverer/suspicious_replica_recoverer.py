@@ -173,7 +173,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     suspicious_replicas_avail_elsewhere = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_avail_elsewhere)
                     suspicious_replicas_last_copy = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_last_copy)
                     logging.debug('\n')
-                    logging.debug('Suspicious replicas on %s:',rse_expr) 
+                    logging.debug('Suspicious replicas on %s:',rse_expr)
                     logging.debug('Replicas with copies on other RSEs:')
                     for i in suspicious_replicas_avail_elsewhere:
                         logging.debug(i)
@@ -231,6 +231,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
 
                 list_problematic_rses = []
                 remaining_files_no_copy = []
+                remaining_files_no_copy_filtered = []
 
                 for rse_key in list(recoverable_replicas[vo].keys()):
                     if len(recoverable_replicas[vo][rse_key].values()) > limit_suspicious_files_on_rse:
@@ -244,7 +245,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         ###########
                         logging.info("replica_recoverer[%i/%i]: %s is problematic (more than %i suspicious replicas). Send a Jira ticket for the RSE (to be implemented).\n", worker_number, total_workers, rse_key, limit_suspicious_files_on_rse)
                         logging.info("replica_recoverer[%i/%i]: The following files on %s have been marked as TEMPORARILY UNAVAILABLE:", rse_key)
-                        for rse_values in recoverable_replicas[vo][rse_key].values():                                                                                                                                                
+                        for rse_values in recoverable_replicas[vo][rse_key].values():
                             logging.info('replica_recoverer[%i/%i]: Scope: %s    Name: %s', worker_number, total_workers, rse_values['scope'], rse_values['name'])
                         # Remove the RSE from the dictionary as it has been dealt with.
                         del recoverable_replicas[vo][rse_key]
@@ -288,15 +289,28 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     logging.info('replica_recoverer[%i/%i]: Finished declaring bad replicas on %s.\n', worker_number, total_workers, rse_key)
 
 
+                # Deal with files based on file type
                 json_file = open("suspicious_replica_recoverer.json")
                 json_data = json.load(json_file)
-                for replica in remaining_files_no_copy:
-                    file_metadata = get_metadata(replica["scope"], replica["name"])
+                for replica_key, replica_values in remaining_files_no_copy.items():
+                    file_metadata = get_metadata(replica_values["scope"], replica_values["name"])
                     for i in json_data:
                         if file_metadata["datatype"] == None:
-                            logging.info("File type for %s is None", replica["name"])
+                            logging.info("File type for %s is None", replica_values["name"])
                         elif i["datatype"] == file_metadata["datatype"].split("_")[-1]:
                             action = i["action"]
+                            if action == "ignore":
+                                # Remove file from list, so it doesn't get marked a bad.
+                                continue
+                            elif action == "mark bad":
+                                remaining_files_no_copy_filtered.append(replica_values['surl'])
+                for i in remaining_files_no_copy_filtered:
+                    print(i)
+                ###########
+                # REMOVED FOR TEST:
+                # declare_bad_file_replicas(pfns=remaining_files_no_copy_filtered, reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
+                ###########
+
                         # read json file, check if there is a policy
 
 

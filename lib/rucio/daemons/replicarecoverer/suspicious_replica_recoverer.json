@@ -1,12 +1,10 @@
 [
     {
         "datatype": "RAW",
-        "action": "hello" 
+        "action": "ignore"
     },
     {
-        "datatype": "AOD", 
-        "action": "bonjour"
+        "datatype": "AOD",
+        "action": "mark bad"
     }
 ]
-
-
