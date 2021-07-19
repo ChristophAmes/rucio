@@ -158,7 +158,9 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                 if vo not in recoverable_replicas:
                     recoverable_replicas[vo]={}
                 rse_list = list_rses()
-                logging.debug("List of RSEs: \n %s \n", rse_list)
+                logging.debug("List of RSEs:")
+                for i in rse_list:
+                    logging.debug(i)
                 # Remove RSEs from the list that have been labeled as deleted or where the RSE expression does not end with "DATADISK" or "SCRATCHDISK"
                 rse_list[:] = [rse for rse in rse_list if ((rse['deleted'] is False) and (rse['rse'].split("_")[-1] in {"DATADISK", "SCRATCHDISK"}))]
 
@@ -170,10 +172,17 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                         recoverable_replicas[vo][rse_expr] = {}
                     suspicious_replicas_avail_elsewhere = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_avail_elsewhere)
                     suspicious_replicas_last_copy = get_suspicious_files(rse_expr, filter={'vo': vo}, **getfileskwargs_last_copy)
-                    logging.debug('Suspicious replicas on RSE %s: \n Replicas with copies on other RSEs: \n %s \n Replicas that are the last remaining copy: \n %s ', rse_expr, suspicious_replicas_avail_elsewhere, suspicious_replicas_last_copy)
+                    logging.debug('\n')
+                    logging.debug('Suspicious replicas on %s:',rse_expr) 
+                    logging.debug('Replicas with copies on other RSEs:')
+                    for i in suspicious_replicas_avail_elsewhere:
+                        logging.debug(i)
+                    logging.debug('Replicas that are the last remaining copy:')
+                    for i in suspicious_replicas_last_copy:
+                        logging.debug(i)
 
                     if (rse['availability'] not in {4, 5, 6, 7}) and ((len(suspicious_replicas_avail_elsewhere) > 0) or (len(suspicious_replicas_last_copy) > 0)):
-                        logging.warning("replica_recoverer[%i/%i]: %s is not available (availability: %i), yet is has suspicious replicas. Please investigate. \n", worker_number, total_workers, rse_expr, rse['availability'])
+                        logging.warning("\nreplica_recoverer[%i/%i]: %s is not available (availability: %i), yet is has suspicious replicas. Please investigate. \n", worker_number, total_workers, rse_expr, rse['availability'])
                         continue
 
                     if suspicious_replicas_avail_elsewhere:
@@ -214,37 +223,33 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     for i in recoverable_replicas[vo][rse_expr]:
                         logging.debug(i)
 
+                logging.info('\n\n\n\n\n\n\n\n')
                 logging.info('replica_recoverer[%i/%i]: All RSEs have been checked for suspicious replicas. Total time: %.2f seconds.', worker_number, total_workers, time.time() - start)
-                logging.info('replica_recoverer[%i/%i]: Begin check for problematic RSEs.', worker_number, total_workers)
+                logging.info('replica_recoverer[%i/%i]: Begin check for problematic RSEs.\n\n\n', worker_number, total_workers)
                 time_start_check_probl = time.time()
 
 
                 list_problematic_rses = []
                 remaining_files_no_copy = []
 
-                for rse_key, rse_values in recoverable_replicas[vo].items():
-                    logging.debug('All suspicious replicas (%i) on %s: \n %s', len(recoverable_replicas[vo][rse]), rse_key, recoverable_replicas[vo][rse])
-                    if len(rse_value) == 0:
-                        logging.info('replica_recoverer[%i/%i]: %s has no suspicious replicas.\n', worker_number, total_workers, rse_key)
-                        del recoverable_replicas[vo][rse_key]
-                        continue
-
-                    # Number of RSEs with less than *limit_suspicious_files_on_rse* suspicious replicas
-
-                    if len(rse_values) > limit_suspicious_files_on_rse:
+                for rse_key in list(recoverable_replicas[vo].keys()):
+                    if len(recoverable_replicas[vo][rse_key].values()) > limit_suspicious_files_on_rse:
                         list_problematic_rses.append(rse_key)
                         surls_list = []
-                        for replica_value in recoverable_replicas[vo][rse].values():
+                        for replica_value in recoverable_replicas[vo][rse_key].values():
                             surls_list.append(replica_value['surl'])
                         ###########
                         # REMOVED FOR TEST:
                         # add_bad_pfns(pfns=surls_list, account=ACCOUNT?, state=TEMPORARY_UNAVAILABLE)
                         ###########
-                        logging.info("replica_recoverer[%i/%i]: %s is problematic (more than %i suspicious replicas). Send a Jira ticket for the RSE (to be implemented).\n", worker_number, total_workers, rse, limit_suspicious_files_on_rse)
+                        logging.info("replica_recoverer[%i/%i]: %s is problematic (more than %i suspicious replicas). Send a Jira ticket for the RSE (to be implemented).\n", worker_number, total_workers, rse_key, limit_suspicious_files_on_rse)
+                        logging.info("replica_recoverer[%i/%i]: The following files on %s have been marked as TEMPORARILY UNAVAILABLE:", rse_key)
+                        for rse_values in recoverable_replicas[vo][rse_key].values():                                                                                                                                                
+                            logging.info('replica_recoverer[%i/%i]: Scope: %s    Name: %s', worker_number, total_workers, rse_values['scope'], rse_values['name'])
                         # Remove the RSE from the dictionary as it has been dealt with.
-                        del recoverable_replicas[vo][rse]
+                        del recoverable_replicas[vo][rse_key]
 
-                logging.info("replica_recoverer[%i/%i]: Following RSEs were deemed problematic (total: %i)", worker_number, total_workers, len(list_problematic_rses))
+                logging.info("\n\nreplica_recoverer[%i/%i]: Following RSEs were deemed problematic (total: %i)", worker_number, total_workers, len(list_problematic_rses))
                 for rse in list_problematic_rses:
                     logging.info("replica_recoverer[%i/%i]: %s", worker_number, total_workers, rse)
 
@@ -256,6 +261,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     if len(recoverable_replicas[vo][rse_key]) == 0:
                         del recoverable_replicas[vo][rse_key]
                         continue
+                    # Get the rse_id by going to one of the suspicious replicas on the RSE and reading it from there
                     rse_id = list(recoverable_replicas[vo][rse_key].values())[0]['rse_id']
                     files_to_be_declared_bad = []
                     for replica in recoverable_replicas[vo][rse_key].values():
@@ -270,7 +276,7 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                             else:
                                 remaining_files_no_copy.append(replica)
 
-                    logging.debug('(%s) Remaining pfns that will be marked BAD:', rse_key)
+                    logging.debug('\n\n(%s) Remaining pfns that will be marked BAD:', rse_key)
                     for i in files_to_be_declared_bad:
                         logging.debug(i)
                     logging.info('replica_recoverer[%i/%i]: Ready to declare %i bad replica(s) on %s (RSE id: %s).',
@@ -281,18 +287,16 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                     ###########
                     logging.info('replica_recoverer[%i/%i]: Finished declaring bad replicas on %s.\n', worker_number, total_workers, rse_key)
 
-                print("\n \n \n")
+
                 json_file = open("suspicious_replica_recoverer.json")
                 json_data = json.load(json_file)
-                print(json_data)
                 for replica in remaining_files_no_copy:
                     file_metadata = get_metadata(replica["scope"], replica["name"])
-                    print("\n", file_metadata)
                     for i in json_data:
-                        print("i: ", i)
-                        if i["datatype"] == file_metadata["datatype"].split("_")[-1]:
+                        if file_metadata["datatype"] == None:
+                            logging.info("File type for %s is None", replica["name"])
+                        elif i["datatype"] == file_metadata["datatype"].split("_")[-1]:
                             action = i["action"]
-                            print(action)
                         # read json file, check if there is a policy
 
 
