@@ -233,6 +233,8 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                 remaining_files_no_copy = {}
                 remaining_files_no_copy_filtered = []
 
+                # If an RSE has more than *limit_suspicious_files_on_rse* suspicious files, then there might be a problem with the RSE.
+                # The suspicious files are marked as temporarily unavailable.
                 for rse_key in list(recoverable_replicas[vo].keys()):
                     if len(recoverable_replicas[vo][rse_key].values()) > limit_suspicious_files_on_rse:
                         list_problematic_rses.append(rse_key)
@@ -254,28 +256,27 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                 for rse in list_problematic_rses:
                     logging.info("replica_recoverer[%i/%i]: %s", worker_number, total_workers, rse)
 
-                # Label remaining suspicious replicas as bad if they have oher copies elsewhere.
+                # Label suspicious replicas as bad if they have oher copies on other RSEs (that aren't also marked as suspicious).
                 # If they are the last remaining copies, deal with them differently.
                 for rse_key in list(recoverable_replicas[vo].keys()):
-                    # Remove remaining RSEs that don't have any suspicious replicas (should only exist for sites that had at least
-                    # one RSE with a suspicious replica)
+                    # Remove RSEs from dict that don't have any suspicious replicas
                     if len(recoverable_replicas[vo][rse_key]) == 0:
                         del recoverable_replicas[vo][rse_key]
                         continue
-                    # Get the rse_id by going to one of the suspicious replicas on the RSE and reading it from there
+                    # Get the rse_id by going to one of the suspicious replicas from that RSE and reading it from there
                     rse_id = list(recoverable_replicas[vo][rse_key].values())[0]['rse_id']
                     files_to_be_declared_bad = []
                     for replica_key, replica_values in recoverable_replicas[vo][rse_key].items():
                         if replica_values['available_elsewhere'] == True:
                             # Replicas with other copies on at least one other RSE can safely be labeled as bad
-                            files_to_be_declared_bad.append(replica['surl'])
+                            files_to_be_declared_bad.append(replica_values['surl'])
                         if replica_values['available_elsewhere'] == False:
-                            # Don't keep log files or user files
                             if (replica_values['name'].startswith("log.")) or (replica_values['name'].startswith("user")):
+                                # Don't keep log files or user files
                                 files_to_be_declared_bad.append(replica_values['surl'])
-                            # Save remaining replicas that don't have another copy in a list for further inspection.
                             else:
-                                remaining_files_no_copy[replica_key][replica_values]
+                                # Save remaining replicas that don't have another copy in a list for further inspection.
+                                remaining_files_no_copy[replica_key] = replica_values
 
                     logging.debug('\n\n(%s) Remaining pfns that will be marked BAD:', rse_key)
                     for i in files_to_be_declared_bad:
@@ -304,8 +305,6 @@ def declare_suspicious_replicas_bad(once=False, younger_than=3, nattempts=10, vo
                                 continue
                             elif action == "mark bad":
                                 remaining_files_no_copy_filtered.append(replica_values['surl'])
-                for i in remaining_files_no_copy_filtered:
-                    print(i)
                 ###########
                 # REMOVED FOR TEST:
                 # declare_bad_file_replicas(pfns=remaining_files_no_copy_filtered, reason='Suspicious. Automatic recovery.', issuer=InternalAccount('root', vo=vo), status=BadFilesStatus.BAD, session=None)
